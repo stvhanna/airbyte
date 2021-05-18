@@ -22,11 +22,49 @@
 # SOFTWARE.
 #
 
+from typing import Mapping, Any, List, Tuple, Optional
 
-from airbyte_cdk.sources.deprecated.base_source import BaseSource
+from airbyte_cdk import AirbyteLogger
+from airbyte_cdk.sources import AbstractSource
+from airbyte_cdk.sources.streams import Stream
 
-from .client import Client
+from .api import ApplicationRoles, Avatars, Dashboards, Filters, FilterSharing, Groups, Issues, IssueComments, \
+    IssueFields, IssueFieldConfigurations, IssueCustomFieldContexts, IssueLinkTypes, IssueNavigatorSettings, \
+    IssueNotificationSchemes, IssuePriorities, IssueProperties, IssueRemoteLinks, IssueResolutions, \
+    IssueSecuritySchemes, IssueTypeSchemes, IssueTypeScreenSchemes, IssueVotes, IssueWatchers, IssueWorklogs
+from .auth import JiraBasicAuthAuthenticator
 
 
-class SourceJira(BaseSource):
-    client_class = Client
+class SourceJira(AbstractSource):
+
+    def check_connection(self, logger: AirbyteLogger, config: Mapping[str, Any]) -> Tuple[bool, Optional[Any]]:
+        return True, None
+
+    def streams(self, config: Mapping[str, Any]) -> List[Stream]:
+        authenticator = JiraBasicAuthAuthenticator(config["email"], config["api_token"])
+        args = {"authenticator": authenticator, "domain": config["domain"]}
+        return [
+            # ApplicationRoles(**args),
+            # Avatars(**args),
+            # Dashboards(**args),
+            # Filters(**args),
+            # FilterSharing(**args),
+            # Issues(**args),
+            # IssueComments(**args),
+            # IssueFields(**args),
+            # IssueFieldConfigurations(**args),
+            # IssueCustomFieldContexts(**args),
+            # IssueLinkTypes(**args),
+            # IssueNavigatorSettings(**args),
+            # IssueNotificationSchemes(**args),
+            # IssuePriorities(**args),
+            # IssueProperties(**args),
+            # IssueRemoteLinks(**args),
+            # IssueResolutions(**args),
+            # IssueSecuritySchemes(**args),
+            # IssueTypeSchemes(**args),
+            # IssueTypeScreenSchemes(**args),
+            # IssueVotes(**args),
+            # IssueWatchers(**args),
+            IssueWorklogs(**args),
+        ]
