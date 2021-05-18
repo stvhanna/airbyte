@@ -28,6 +28,7 @@ import com.google.common.annotations.VisibleForTesting;
 import io.airbyte.api.model.CheckConnectionRead;
 import io.airbyte.api.model.CheckConnectionRead.StatusEnum;
 import io.airbyte.api.model.ConnectionIdRequestBody;
+import io.airbyte.api.model.ConnectionState;
 import io.airbyte.api.model.DestinationCoreConfig;
 import io.airbyte.api.model.DestinationDefinitionIdRequestBody;
 import io.airbyte.api.model.DestinationDefinitionSpecificationRead;
@@ -51,6 +52,7 @@ import io.airbyte.config.StandardCheckConnectionOutput;
 import io.airbyte.config.StandardDestinationDefinition;
 import io.airbyte.config.StandardSourceDefinition;
 import io.airbyte.config.StandardSync;
+import io.airbyte.config.State;
 import io.airbyte.config.persistence.ConfigNotFoundException;
 import io.airbyte.config.persistence.ConfigRepository;
 import io.airbyte.protocol.models.AirbyteCatalog;
@@ -75,9 +77,14 @@ import io.temporal.api.workflowservice.v1.RequestCancelWorkflowExecutionRequest;
 import io.temporal.serviceclient.WorkflowServiceStubs;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.Optional;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class SchedulerHandler {
+
+  private static final Logger LOGGER = LoggerFactory.getLogger(SchedulerHandler.class);
 
   private final ConfigRepository configRepository;
   private final SchedulerJobClient schedulerJobClient;
@@ -307,6 +314,18 @@ public class SchedulerHandler {
     final Job job = schedulerJobClient.createOrGetActiveResetConnectionJob(destination, standardSync, destinationImageName);
 
     return JobConverter.getJobInfoRead(job);
+  }
+
+  public ConnectionState getConnectionState(ConnectionIdRequestBody connectionIdRequestBody) throws IOException {
+    final Optional<State> currentState = jobPersistence.getCurrentState(connectionIdRequestBody.getConnectionId());
+    LOGGER.info("currentState server: {}", currentState);
+
+    final ConnectionState connectionState = new ConnectionState()
+        .connectionId(connectionIdRequestBody.getConnectionId());
+
+    currentState.ifPresent(state -> connectionState.state(state.getState()));
+
+    return connectionState;
   }
 
   public JobInfoRead cancelJob(JobIdRequestBody jobIdRequestBody) throws IOException {

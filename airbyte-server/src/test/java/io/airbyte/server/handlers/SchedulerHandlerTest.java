@@ -35,8 +35,10 @@ import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.google.common.collect.ImmutableMap;
 import io.airbyte.api.model.CheckConnectionRead;
 import io.airbyte.api.model.ConnectionIdRequestBody;
+import io.airbyte.api.model.ConnectionState;
 import io.airbyte.api.model.DestinationCoreConfig;
 import io.airbyte.api.model.DestinationDefinitionIdRequestBody;
 import io.airbyte.api.model.DestinationIdRequestBody;
@@ -59,6 +61,7 @@ import io.airbyte.config.StandardCheckConnectionOutput;
 import io.airbyte.config.StandardDestinationDefinition;
 import io.airbyte.config.StandardSourceDefinition;
 import io.airbyte.config.StandardSync;
+import io.airbyte.config.State;
 import io.airbyte.config.persistence.ConfigNotFoundException;
 import io.airbyte.config.persistence.ConfigRepository;
 import io.airbyte.protocol.models.AirbyteCatalog;
@@ -132,6 +135,7 @@ class SchedulerHandlerTest {
   private ConfigurationUpdate configurationUpdate;
   private JsonSchemaValidator jsonSchemaValidator;
   private SpecFetcher specFetcher;
+  private JobPersistence jobPersistence;
 
   @BeforeEach
   void setup() {
@@ -147,7 +151,7 @@ class SchedulerHandlerTest {
     schedulerJobClient = spy(SchedulerJobClient.class);
     synchronousSchedulerClient = mock(SynchronousSchedulerClient.class);
     configRepository = mock(ConfigRepository.class);
-    final JobPersistence jobPersistence = mock(JobPersistence.class);
+    jobPersistence = mock(JobPersistence.class);
     final JobNotifier jobNotifier = mock(JobNotifier.class);
 
     schedulerHandler = new SchedulerHandler(
@@ -539,6 +543,25 @@ class SchedulerHandlerTest {
     verify(configRepository).getStandardSync(standardSync.getConnectionId());
     verify(configRepository).getDestinationConnection(standardSync.getDestinationId());
     verify(schedulerJobClient).createOrGetActiveResetConnectionJob(destination, standardSync, DESTINATION_DOCKER_IMAGE);
+  }
+
+  @Test
+  void testGetCurrentState() throws IOException {
+    final UUID connectionId = UUID.randomUUID();
+    final State state = new State().withState(Jsons.jsonNode(ImmutableMap.of("checkpoint", 1)));
+    when(jobPersistence.getCurrentState(connectionId)).thenReturn(Optional.of(state));
+
+    final ConnectionState connectionState = schedulerHandler.getConnectionState(new ConnectionIdRequestBody().connectionId(connectionId));
+    assertEquals(new ConnectionState().connectionId(connectionId).state(state.getState()), connectionState);
+  }
+
+  @Test
+  void testGetCurrentStateEmpty() throws IOException {
+    final UUID connectionId = UUID.randomUUID();
+    when(jobPersistence.getCurrentState(connectionId)).thenReturn(Optional.empty());
+
+    final ConnectionState connectionState = schedulerHandler.getConnectionState(new ConnectionIdRequestBody().connectionId(connectionId));
+    assertEquals(new ConnectionState().connectionId(connectionId), connectionState);
   }
 
   @Test
