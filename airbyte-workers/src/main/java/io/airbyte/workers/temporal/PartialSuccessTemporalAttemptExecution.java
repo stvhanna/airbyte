@@ -27,23 +27,13 @@ package io.airbyte.workers.temporal;
 import com.google.common.annotations.VisibleForTesting;
 import io.airbyte.commons.functional.CheckedConsumer;
 import io.airbyte.commons.functional.CheckedSupplier;
-import io.airbyte.commons.io.IOs;
-import io.airbyte.config.EnvConfigs;
 import io.airbyte.scheduler.models.JobRunConfig;
 import io.airbyte.workers.Worker;
-import io.airbyte.workers.WorkerException;
-import io.airbyte.workers.WorkerUtils;
-import io.temporal.activity.Activity;
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.Predicate;
@@ -62,21 +52,16 @@ public class PartialSuccessTemporalAttemptExecution<INPUT, OUTPUT> implements Su
 
   private static final Logger LOGGER = LoggerFactory.getLogger(PartialSuccessTemporalAttemptExecution.class);
 
-  private static final Duration HEARTBEAT_INTERVAL = Duration.ofSeconds(10);
-  public static String WORKFLOW_ID_FILENAME = "WORKFLOW_ID";
-
-  private final Path jobRoot;
   private final CheckedSupplier<Worker<INPUT, OUTPUT>, Exception> workerSupplier;
   private final Supplier<INPUT> inputSupplier;
-  private final String jobId;
-  private final BiConsumer<Path, String> mdcSetter;
-  private final CheckedConsumer<Path, IOException> jobRootDirCreator;
   private final CancellationHandler cancellationHandler;
-  private final Supplier<String> workflowIdProvider;
 
   private final Predicate<OUTPUT> shouldAttemptAgainPredicate;
   private final BiFunction<INPUT, OUTPUT, INPUT> computeNextAttemptInputFunction;
   private final int maxRetriesCount;
+  private final TemporalAttemptExecutionFactory<INPUT, OUTPUT> temporalAttemptExecutionFactory;
+  private final Path workspaceRoot;
+  private final JobRunConfig jobRunConfig;
 
   public PartialSuccessTemporalAttemptExecution(Path workspaceRoot,
                                                 JobRunConfig jobRunConfig,
@@ -91,13 +76,11 @@ public class PartialSuccessTemporalAttemptExecution<INPUT, OUTPUT> implements Su
         jobRunConfig,
         workerSupplier,
         initialInputSupplier,
-        WorkerUtils::setJobMdc,
-        Files::createDirectories,
         cancellationHandler,
-        () -> Activity.getExecutionContext().getInfo().getWorkflowId(),
         shouldAttemptAgainPredicate,
         computeNextAttemptInputFunction,
-        maxRetriesCount);
+        maxRetriesCount,
+        TemporalAttemptExecution::new);
   }
 
   @VisibleForTesting
@@ -112,119 +95,127 @@ public class PartialSuccessTemporalAttemptExecution<INPUT, OUTPUT> implements Su
                                          Predicate<OUTPUT> shouldAttemptAgainPredicate,
                                          BiFunction<INPUT, OUTPUT, INPUT> computeNextAttemptInputFunction,
                                          int maxRetriesCount) {
-    this.jobRoot = WorkerUtils.getJobRoot(workspaceRoot, jobRunConfig.getJobId(), jobRunConfig.getAttemptId());
+    this(
+        workspaceRoot,
+        jobRunConfig,
+        workerSupplier,
+        initialInputSupplier,
+        cancellationHandler,
+        shouldAttemptAgainPredicate,
+        computeNextAttemptInputFunction,
+        maxRetriesCount,
+        (Path workspaceRootArg,
+         JobRunConfig jobRunConfigArg,
+         CheckedSupplier<Worker<INPUT, OUTPUT>, Exception> workerSupplierArg,
+         Supplier<INPUT> initialInputSupplierArg,
+         // for testing.
+         CancellationHandler e) -> new TestTemporalAttemptExecutionFactory<INPUT, OUTPUT>(mdcSetter, jobRootDirCreator, workflowIdProvider)
+             .create(workspaceRootArg, jobRunConfigArg, workerSupplierArg, initialInputSupplierArg, e));
+  }
+
+  @VisibleForTesting
+  PartialSuccessTemporalAttemptExecution(Path workspaceRoot,
+                                         JobRunConfig jobRunConfig,
+                                         CheckedSupplier<Worker<INPUT, OUTPUT>, Exception> workerSupplier,
+                                         Supplier<INPUT> initialInputSupplier,
+                                         CancellationHandler cancellationHandler,
+                                         Predicate<OUTPUT> shouldAttemptAgainPredicate,
+                                         BiFunction<INPUT, OUTPUT, INPUT> computeNextAttemptInputFunction,
+                                         int maxRetriesCount,
+                                         TemporalAttemptExecutionFactory<INPUT, OUTPUT> temporalAttemptExecutionFactory) {
+    this.workspaceRoot = workspaceRoot;
+    this.jobRunConfig = jobRunConfig;
     this.workerSupplier = workerSupplier;
     this.inputSupplier = initialInputSupplier;
-    this.jobId = jobRunConfig.getJobId();
-    this.mdcSetter = mdcSetter;
-    this.jobRootDirCreator = jobRootDirCreator;
     this.cancellationHandler = cancellationHandler;
-    this.workflowIdProvider = workflowIdProvider;
     this.shouldAttemptAgainPredicate = shouldAttemptAgainPredicate;
     this.computeNextAttemptInputFunction = computeNextAttemptInputFunction;
     this.maxRetriesCount = maxRetriesCount;
+    this.temporalAttemptExecutionFactory = temporalAttemptExecutionFactory;
   }
 
   @Override
   public List<OUTPUT> get() {
-    try {
-      mdcSetter.accept(jobRoot, jobId);
+    INPUT input = inputSupplier.get();
+    final AtomicReference<OUTPUT> lastOutput = new AtomicReference<>();
+    List<OUTPUT> outputCollector = new ArrayList<>();
 
-      LOGGER.info("Executing worker wrapper. Airbyte version: {}", new EnvConfigs().getAirbyteVersionOrWarning());
-      jobRootDirCreator.accept(jobRoot);
-
-      final String workflowId = workflowIdProvider.get();
-      final Path workflowIdFile = jobRoot.getParent().resolve(WORKFLOW_ID_FILENAME);
-      IOs.writeFile(workflowIdFile, workflowId);
-
-      final Worker<INPUT, OUTPUT> worker = workerSupplier.get();
-      final CompletableFuture<List<OUTPUT>> outputFuture = new CompletableFuture<>();
-      final Thread workerThread = getWorkerThread(worker, outputFuture);
-      final ScheduledExecutorService scheduledExecutor = Executors.newSingleThreadScheduledExecutor();
-      final Runnable cancellationChecker = getCancellationChecker(worker, workerThread, outputFuture);
-
-      // check once first that we are not already cancelled. if we are, don't start!
-      cancellationChecker.run();
-
-      workerThread.start();
-      scheduledExecutor.scheduleAtFixedRate(cancellationChecker, 0, HEARTBEAT_INTERVAL.toSeconds(), TimeUnit.SECONDS);
-
-      try {
-        // block and wait for the output
-        return outputFuture.get();
-      } finally {
-        LOGGER.info("Stopping cancellation check scheduling...");
-        scheduledExecutor.shutdown();
+    int i = 0;
+    while (true) {
+      if (i >= maxRetriesCount) {
+        LOGGER.info("Max retries reached: {}", i);
+        break;
       }
-    } catch (Exception e) {
-      throw Activity.wrap(e);
+
+      final boolean hasLastOutput = lastOutput.get() != null;
+      final boolean shouldAttemptAgain = !hasLastOutput || shouldAttemptAgainPredicate.test(lastOutput.get());
+      LOGGER.info("Last output present: {}. Should attempt again: {}", lastOutput.get() != null, shouldAttemptAgain);
+      if (hasLastOutput && !shouldAttemptAgain) {
+        break;
+      }
+
+      LOGGER.info("Starting attempt: {} of {}", i, maxRetriesCount);
+
+      Supplier<INPUT> resolvedInputSupplier = !hasLastOutput ? inputSupplier : () -> computeNextAttemptInputFunction.apply(input, lastOutput.get());
+
+      final TemporalAttemptExecution<INPUT, OUTPUT> temporalAttemptExecution = temporalAttemptExecutionFactory.create(
+          workspaceRoot,
+          jobRunConfig,
+          workerSupplier,
+          resolvedInputSupplier,
+          cancellationHandler);
+      lastOutput.set(temporalAttemptExecution.get());
+      outputCollector.add(lastOutput.get());
+      i++;
     }
+
+    return outputCollector;
   }
 
-  private Thread getWorkerThread(Worker<INPUT, OUTPUT> worker, CompletableFuture<List<OUTPUT>> outputFuture) {
-    return new Thread(() -> {
-      mdcSetter.accept(jobRoot, jobId);
-      try {
-        INPUT input = inputSupplier.get();
-        OUTPUT lastOutput = null;
-        List<OUTPUT> outputCollector = new ArrayList<>();
+  // interface to make testing easier.
+  @FunctionalInterface
+  interface TemporalAttemptExecutionFactory<INPUT, OUTPUT> {
 
-        // if there are retries left and the worker has never run or based on previous out it should run
-        // again keep trying.
-        int i = 0;
-        while (true) {
-          if (i >= maxRetriesCount) {
-            LOGGER.info("Max retries reached: {}", i);
-            break;
-          }
+    TemporalAttemptExecution<INPUT, OUTPUT> create(Path workspaceRoot,
+                                                   JobRunConfig jobRunConfig,
+                                                   CheckedSupplier<Worker<INPUT, OUTPUT>, Exception> workerSupplier,
+                                                   Supplier<INPUT> inputSupplier,
+                                                   CancellationHandler cancellationHandler);
 
-          final boolean hasLastOutput = lastOutput != null;
-          final boolean shouldAttemptAgain = shouldAttemptAgainPredicate.test(lastOutput);
-          LOGGER.info("Last output present: {}. Should attempt again: {}", lastOutput != null, shouldAttemptAgain);
-          if (hasLastOutput && !shouldAttemptAgain) {
-            break;
-          }
-
-          LOGGER.info("Starting attempt: {} of {}", i, maxRetriesCount);
-
-          if (lastOutput != null) {
-            input = computeNextAttemptInputFunction.apply(input, lastOutput);
-          }
-          // each worker run should run in a separate directory.
-          final Path attemptRoot = Files.createDirectories(jobRoot.resolve(String.valueOf(i)));
-          lastOutput = worker.run(input, attemptRoot);
-          outputCollector.add(lastOutput);
-          i++;
-        }
-        outputFuture.complete(outputCollector);
-      } catch (Throwable e) {
-        LOGGER.info("Completing future exceptionally...", e);
-        outputFuture.completeExceptionally(e);
-      }
-    });
   }
 
-  private Runnable getCancellationChecker(Worker<INPUT, OUTPUT> worker, Thread workerThread, CompletableFuture<List<OUTPUT>> outputFuture) {
-    return () -> {
-      try {
-        mdcSetter.accept(jobRoot, jobId);
+  private static class TestTemporalAttemptExecutionFactory<INPUT, OUTPUT> implements TemporalAttemptExecutionFactory<INPUT, OUTPUT> {
 
-        final Runnable onCancellationCallback = () -> {
-          LOGGER.info("Running sync worker cancellation...");
-          worker.cancel();
+    private final BiConsumer<Path, String> mdcSetter;
+    private final CheckedConsumer<Path, IOException> jobRootDirCreator;
+    private final Supplier<String> workflowIdProvider;
 
-          LOGGER.info("Interrupting worker thread...");
-          workerThread.interrupt();
+    public TestTemporalAttemptExecutionFactory(
+                                               BiConsumer<Path, String> mdcSetter,
+                                               CheckedConsumer<Path, IOException> jobRootDirCreator,
+                                               Supplier<String> workflowIdProvider) {
+      this.mdcSetter = mdcSetter;
+      this.jobRootDirCreator = jobRootDirCreator;
+      this.workflowIdProvider = workflowIdProvider;
+    }
 
-          LOGGER.info("Cancelling completable future...");
-          outputFuture.cancel(false);
-        };
+    @Override
+    public TemporalAttemptExecution<INPUT, OUTPUT> create(final Path workspaceRoot,
+                                                          final JobRunConfig jobRunConfig,
+                                                          final CheckedSupplier<Worker<INPUT, OUTPUT>, Exception> workerSupplier,
+                                                          final Supplier<INPUT> inputSupplier,
+                                                          final CancellationHandler cancellationHandler) {
+      return new TemporalAttemptExecution<>(
+          workspaceRoot,
+          jobRunConfig,
+          workerSupplier,
+          inputSupplier,
+          mdcSetter,
+          jobRootDirCreator,
+          cancellationHandler,
+          workflowIdProvider);
+    }
 
-        cancellationHandler.checkAndHandleCancellation(onCancellationCallback);
-      } catch (WorkerException e) {
-        LOGGER.error("Cancellation checker exception", e);
-      }
-    };
   }
 
 }

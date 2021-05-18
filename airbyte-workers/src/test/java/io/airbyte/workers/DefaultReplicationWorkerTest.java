@@ -198,11 +198,11 @@ class DefaultReplicationWorkerTest {
 
     final ReplicationOutput actual = worker.run(syncInput, jobRoot);
     assertNotNull(actual);
-    assertEquals(actual.getState().getState(), STATE_MESSAGE.getState().getData());
+    assertEquals(STATE_MESSAGE.getState().getData(), actual.getState().getState());
   }
 
   @Test
-  void testDoesNotPopulatesStateOnFailureIfNotAvailable() throws Exception {
+  void testRetainsStateOnFailureIfNewStateNotAvailable() throws Exception {
     doThrow(new IllegalStateException("induced exception")).when(source).close();
 
     final ReplicationWorker worker = new DefaultReplicationWorker(
@@ -215,6 +215,29 @@ class DefaultReplicationWorkerTest {
         destinationMessageTracker);
 
     final ReplicationOutput actual = worker.run(syncInput, jobRoot);
+
+    assertNotNull(actual);
+    assertEquals(syncInput.getState().getState(), actual.getState().getState());
+  }
+
+  @Test
+  void testDoesNotPopulatesStateOnFailureIfNotAvailable() throws Exception {
+    final StandardSyncInput syncInputWithoutState = Jsons.clone(syncInput);
+    syncInputWithoutState.setState(null);
+
+    doThrow(new IllegalStateException("induced exception")).when(source).close();
+
+    final ReplicationWorker worker = new DefaultReplicationWorker(
+        JOB_ID,
+        JOB_ATTEMPT,
+        source,
+        mapper,
+        destination,
+        sourceMessageTracker,
+        destinationMessageTracker);
+
+    final ReplicationOutput actual = worker.run(syncInputWithoutState, jobRoot);
+
     assertNotNull(actual);
     assertNull(actual.getState());
   }

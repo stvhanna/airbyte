@@ -194,6 +194,7 @@ public interface SyncWorkflow {
       final StandardSyncOutput standardSyncOutput = new StandardSyncOutput();
       standardSyncOutput.setState(MoreLists.last(attemptOutputs).orElseThrow().getState());
       standardSyncOutput.setOutputCatalog(MoreLists.last(attemptOutputs).orElseThrow().getOutputCatalog());
+      standardSyncOutput.setStandardSyncSummary(syncSummary);
 
       LOGGER.info("attempt summaries: {}", attemptOutputs);
       LOGGER.info("sync summary: {}", standardSyncOutput);

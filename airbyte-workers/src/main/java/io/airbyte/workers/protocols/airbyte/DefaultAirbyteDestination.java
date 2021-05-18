@@ -40,8 +40,6 @@ import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.OutputStreamWriter;
 import java.nio.file.Path;
-import java.time.Duration;
-import java.time.temporal.ChronoUnit;
 import java.util.Iterator;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
@@ -53,16 +51,8 @@ public class DefaultAirbyteDestination implements AirbyteDestination {
 
   private static final Logger LOGGER = LoggerFactory.getLogger(DefaultAirbyteDestination.class);
 
-  private static final Duration HEARTBEAT_FRESH_DURATION = Duration.of(5, ChronoUnit.MINUTES);
-  private static final Duration CHECK_HEARTBEAT_DURATION = Duration.of(10, ChronoUnit.SECONDS);
-  // todo (cgardens) - keep the graceful shutdown consistent with current behavior for release. make
-  // sure everything is working well before we reduce this to something more reasonable.
-  private static final Duration GRACEFUL_SHUTDOWN_DURATION = Duration.of(10, ChronoUnit.HOURS);
-  private static final Duration FORCED_SHUTDOWN_DURATION = Duration.of(1, ChronoUnit.MINUTES);
-
   private final IntegrationLauncher integrationLauncher;
   private final AirbyteStreamFactory streamFactory;
-  private final HeartbeatMonitor heartbeatMonitor;
 
   private final AtomicBoolean endOfStream = new AtomicBoolean(false);
 
@@ -71,16 +61,14 @@ public class DefaultAirbyteDestination implements AirbyteDestination {
   private Iterator<AirbyteMessage> messageIterator = null;
 
   public DefaultAirbyteDestination(final IntegrationLauncher integrationLauncher) {
-    this(integrationLauncher, new DefaultAirbyteStreamFactory(), new HeartbeatMonitor(HEARTBEAT_FRESH_DURATION));
+    this(integrationLauncher, new DefaultAirbyteStreamFactory());
 
   }
 
   public DefaultAirbyteDestination(final IntegrationLauncher integrationLauncher,
-                                   final AirbyteStreamFactory streamFactory,
-                                   final HeartbeatMonitor heartbeatMonitor) {
+                                   final AirbyteStreamFactory streamFactory) {
     this.integrationLauncher = integrationLauncher;
     this.streamFactory = streamFactory;
-    this.heartbeatMonitor = heartbeatMonitor;
   }
 
   @Override
@@ -101,7 +89,6 @@ public class DefaultAirbyteDestination implements AirbyteDestination {
     writer = new BufferedWriter(new OutputStreamWriter(destinationProcess.getOutputStream(), Charsets.UTF_8));
 
     messageIterator = streamFactory.create(IOs.newBufferedReader(destinationProcess.getInputStream()))
-        .peek(message -> heartbeatMonitor.beat())
         .filter(message -> message.getType() == Type.STATE)
         .iterator();
   }

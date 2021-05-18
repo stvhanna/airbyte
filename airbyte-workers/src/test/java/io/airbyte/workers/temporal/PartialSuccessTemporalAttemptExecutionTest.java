@@ -30,6 +30,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeast;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -131,7 +132,7 @@ class PartialSuccessTemporalAttemptExecutionTest {
 
     assertEquals(expected, actual);
 
-    verify(execution).get();
+    verify(execution, times(2)).get();
     verify(worker).run(eq(INPUT), any());
     verify(worker).run(eq(INPUT + "I"), any());
     verify(mdcSetter, atLeast(2)).accept(jobRoot, JOB_ID);
@@ -149,7 +150,7 @@ class PartialSuccessTemporalAttemptExecutionTest {
     when(shouldAttemptAgain.test(expected.get(1))).thenReturn(true);
     when(shouldAttemptAgain.test(expected.get(2))).thenReturn(true);
     when(inputSupplier.get()).thenReturn(INPUT);
-    when(nextInput.apply(any(), any())).thenAnswer(a -> a.getArguments()[0] + "I");
+    when(nextInput.apply(any(), any())).thenAnswer(a -> a.getArguments()[0] + "I").thenAnswer(a -> a.getArguments()[0] + "II");
 
     when(execution.get()).thenAnswer((Answer<Worker<String, String>>) invocation -> worker);
 
@@ -157,7 +158,7 @@ class PartialSuccessTemporalAttemptExecutionTest {
 
     assertEquals(expected, actual);
 
-    verify(execution).get();
+    verify(execution, times(3)).get();
     verify(worker).run(eq(INPUT), any());
     verify(worker).run(eq(INPUT + "I"), any());
     verify(worker).run(eq(INPUT + "II"), any());
@@ -176,7 +177,7 @@ class PartialSuccessTemporalAttemptExecutionTest {
   }
 
   @Test
-  void testThrowsUnCheckedException() throws Exception {
+  void testThrowsUncheckedException() throws Exception {
     when(execution.get()).thenThrow(new IllegalArgumentException());
 
     assertThrows(IllegalArgumentException.class, () -> attemptExecution.get());

@@ -110,12 +110,14 @@ public class DefaultReplicationWorker implements ReplicationWorker {
         destination.start(destinationConfig, jobRoot);
         source.start(sourceConfig, jobRoot);
 
-        final Thread sourceThread = new Thread(() -> {
+        final Thread replicationThread = new Thread(() -> {
           try {
             while (!cancelled.get() && !source.isFinished()) {
               final Optional<AirbyteMessage> messageOptional = source.attemptRead();
               if (messageOptional.isPresent()) {
                 final AirbyteMessage message = mapper.mapMessage(messageOptional.get());
+
+                LOGGER.info("record in DefaultReplicationWorker: {}", message);
 
                 sourceMessageTracker.accept(message);
                 destination.accept(message);
@@ -123,27 +125,26 @@ public class DefaultReplicationWorker implements ReplicationWorker {
             }
             destination.notifyEndOfStream();
           } catch (Exception e) {
-            cancel();
             throw new RuntimeException(e);
           }
         });
 
-        final Thread destinationThread = new Thread(() -> {
+        final Thread destinationOutputThread = new Thread(() -> {
           try {
             while (!cancelled.get() && !destination.isFinished()) {
               final Optional<AirbyteMessage> messageOptional = destination.attemptRead();
               if (messageOptional.isPresent()) {
+                LOGGER.info("state in DefaultReplicationWorker from Destination: {}", messageOptional.get());
                 destinationMessageTracker.accept(messageOptional.get());
               }
             }
           } catch (Exception e) {
-            cancel();
             throw new RuntimeException(e);
           }
         });
 
-        final Future<?> sourceThreadExecution = executorService.submit(sourceThread);
-        final Future<?> destinationThreadExecution = executorService.submit(destinationThread);
+        final Future<?> destinationThreadExecution = executorService.submit(destinationOutputThread);
+        final Future<?> sourceThreadExecution = executorService.submit(replicationThread);
 
         LOGGER.info("Waiting for source thread to join.");
         sourceThreadExecution.get();
@@ -175,11 +176,14 @@ public class DefaultReplicationWorker implements ReplicationWorker {
           .withOutputCatalog(destinationConfig.getCatalog());
 
       if (destinationMessageTracker.getOutputState().isPresent()) {
-        final State state = new State()
-            .withState(destinationMessageTracker.getOutputState().get());
+        LOGGER.info("State capture: Updated state to: {}", destinationMessageTracker.getOutputState());
+        final State state = new State().withState(destinationMessageTracker.getOutputState().get());
         output.withState(state);
+      } else if (syncInput.getState() != null) {
+        LOGGER.warn("State capture: No new state, falling back on input state: {}", syncInput.getState());
+        output.withState(syncInput.getState());
       } else {
-        LOGGER.warn("No state retained.");
+        LOGGER.warn("State capture: No state retained.");
       }
 
       return output;
@@ -191,7 +195,7 @@ public class DefaultReplicationWorker implements ReplicationWorker {
 
   @Override
   public void cancel() {
-    LOGGER.info("Cancelling sync worker...");
+    LOGGER.info("Cancelling replication worker...");
     cancelled.set(true);
 
     LOGGER.info("Cancelling source...");
