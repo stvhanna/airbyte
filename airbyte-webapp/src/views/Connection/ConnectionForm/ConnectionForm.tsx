@@ -1,236 +1,325 @@
-import React, { useState } from "react";
+import React, { useCallback, useState } from "react";
 import { FormattedMessage, useIntl } from "react-intl";
 import styled from "styled-components";
-import * as yup from "yup";
 import { Field, FieldProps, Form, Formik } from "formik";
 
-import { SyncSchema } from "core/domain/catalog";
-import { Source } from "core/resources/Source";
-import { Destination } from "core/resources/Destination";
 import ResetDataModal from "components/ResetDataModal";
 import { ModalTypes } from "components/ResetDataModal/types";
 import { equal } from "utils/objects";
 
-import { ControlLabels, DropDown, DropDownRow, Input, Label } from "components";
+import {
+  ControlLabels,
+  DropDown,
+  DropDownRow,
+  H5,
+  Input,
+  Label,
+} from "components";
 
-import BottomBlock from "./components/BottomBlock";
-import Connector from "./components/Connector";
-import SchemaView from "./components/SchemaView";
+import { useDestinationDefinitionSpecificationLoadAsync } from "hooks/services/useDestinationHook";
+import useWorkspace from "hooks/services/useWorkspace";
+import { createFormErrorMessage } from "utils/errorStatusMessage";
+
+import { Connection, ScheduleProperties } from "core/resources/Connection";
+import { ConnectionNamespaceDefinition } from "core/domain/connection";
+import { NamespaceDefinitionField } from "./components/NamespaceDefinitionField";
+import CreateControls from "./components/CreateControls";
+import SchemaField from "./components/SyncCatalogField";
 import EditControls from "./components/EditControls";
-import { useFrequencyDropdownData, useInitialSchema } from "./useInitialSchema";
-import { useDestinationDefinitionSpecificationLoadAsync } from "components/hooks/services/useDestinationHook";
-
-const FormContainer = styled(Form)`
-  padding: 22px 27px 23px 24px;
-`;
+import {
+  ConnectionFormValues,
+  connectionValidationSchema,
+  FormikConnectionFormValues,
+  mapFormPropsToOperation,
+  useFrequencyDropdownData,
+  useInitialValues,
+} from "./formConfig";
+import { OperationsSection } from "./components/OperationsSection";
 
 const EditLaterMessage = styled(Label)`
   margin: -20px 0 29px;
 `;
 
-const ControlLabelsWithMargin = styled(ControlLabels)`
-  margin-bottom: 29px;
-`;
-
 const ConnectorLabel = styled(ControlLabels)`
-  max-width: 247px;
+  max-width: 328px;
   margin-right: 20px;
   vertical-align: top;
 `;
 
-const connectionValidationSchema = yup.object().shape({
-  frequency: yup.string().required("form.empty.error"),
-  prefix: yup.string(),
-});
+const NamespaceFormatLabel = styled(ControlLabels)`
+  flex: 5 0 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+`;
+
+export const FlexRow = styled.div`
+  display: flex;
+  flex-direction: row;
+  justify-content: flex-start;
+  align-items: flex-start;
+
+  gap: 10px;
+`;
+
+const StyledSection = styled.div`
+  padding: 15px 20px;
+
+  & > div:not(:last-child) {
+    margin-bottom: 20px;
+  }
+`;
+
+const Header = styled(H5)`
+  margin-bottom: 16px;
+`;
+
+const Section: React.FC<{ title: React.ReactNode }> = (props) => (
+  <StyledSection>
+    <Header bold>{props.title}</Header>
+    {props.children}
+  </StyledSection>
+);
+
+const FormContainer = styled(Form)`
+  & > ${StyledSection}:not(:last-child) {
+    box-shadow: 0 1px 0 rgba(139, 139, 160, 0.25);
+  }
+`;
 
 type ConnectionFormProps = {
-  schema: SyncSchema;
-  onSubmit: (values: {
-    frequency: string;
-    prefix: string;
-    schema: SyncSchema;
-  }) => void;
+  onSubmit: (values: ConnectionFormValues) => void;
   className?: string;
-  source: Source;
-  destination: Destination;
-  errorMessage?: React.ReactNode;
   additionBottomControls?: React.ReactNode;
   successMessage?: React.ReactNode;
   onReset?: (connectionId?: string) => void;
   onDropDownSelect?: (item: DropDownRow.IDataItem) => void;
   onCancel?: () => void;
+
+  /** Should be passed when connection is updated with withRefreshCatalog flag */
   editSchemeMode?: boolean;
-  frequencyValue?: string;
-  prefixValue?: string;
   isEditMode?: boolean;
-  isLoading?: boolean;
   additionalSchemaControl?: React.ReactNode;
-  sourceIcon?: string;
-  destinationIcon?: string;
+
+  connection:
+    | Connection
+    | (Partial<Connection> &
+        Pick<Connection, "syncCatalog" | "source" | "destination">);
 };
 
 const ConnectionForm: React.FC<ConnectionFormProps> = ({
   onSubmit,
-  sourceIcon,
-  destinationIcon,
   onReset,
+  onCancel,
   className,
-  errorMessage,
-  schema,
   onDropDownSelect,
-  frequencyValue,
-  prefixValue,
   isEditMode,
   successMessage,
   additionBottomControls,
-  onCancel,
   editSchemeMode,
-  isLoading,
   additionalSchemaControl,
-  source,
-  destination,
+  connection,
 }) => {
-  const initialSchema = useInitialSchema(schema);
   const destDefinition = useDestinationDefinitionSpecificationLoadAsync(
-    destination.destinationDefinitionId
+    connection.destination.destinationDefinitionId
   );
-  const dropdownData = useFrequencyDropdownData();
 
   const [modalIsOpen, setResetModalIsOpen] = useState(false);
+  const [submitError, setSubmitError] = useState<Error | null>(null);
+
   const formatMessage = useIntl().formatMessage;
-  // TODO: newSchema config should be part of formik schema
-  const [newSchema, setNewSchema] = useState(initialSchema);
 
-  return (
-    <Formik
-      initialValues={{
-        frequency: frequencyValue || "",
-        prefix: prefixValue || "",
-      }}
-      validateOnBlur={true}
-      validateOnChange={true}
-      validationSchema={connectionValidationSchema}
-      onSubmit={async (values) => {
+  const initialValues = useInitialValues(
+    connection,
+    destDefinition,
+    isEditMode
+  );
+
+  const { workspace } = useWorkspace();
+
+  const onFormSubmit = useCallback(
+    async (values: FormikConnectionFormValues) => {
+      const formValues: ConnectionFormValues = (connectionValidationSchema.cast(
+        values
+      ) as unknown) as ConnectionFormValues;
+
+      formValues.operations = mapFormPropsToOperation(
+        values,
+        connection.operations,
+        workspace.workspaceId
+      );
+
+      setSubmitError(null);
+      try {
+        await onSubmit(formValues);
+
         const requiresReset =
-          isEditMode && !equal(initialSchema, newSchema) && !editSchemeMode;
-        await onSubmit({
-          frequency: values.frequency,
-          prefix: values.prefix,
-          schema: newSchema,
-        });
-
+          isEditMode &&
+          !equal(initialValues.syncCatalog, values.syncCatalog) &&
+          !editSchemeMode;
         if (requiresReset) {
           setResetModalIsOpen(true);
         }
-      }}
+      } catch (e) {
+        setSubmitError(e);
+      }
+    },
+    [
+      editSchemeMode,
+      initialValues.syncCatalog,
+      isEditMode,
+      onSubmit,
+      connection.operations,
+      workspace.workspaceId,
+    ]
+  );
+
+  const errorMessage = submitError ? createFormErrorMessage(submitError) : null;
+  const frequencies = useFrequencyDropdownData();
+
+  return (
+    <Formik
+      initialValues={initialValues}
+      validationSchema={connectionValidationSchema}
+      enableReinitialize={true}
+      onSubmit={onFormSubmit}
     >
-      {({ isSubmitting, setFieldValue, isValid, dirty, resetForm }) => (
+      {({ isSubmitting, setFieldValue, isValid, dirty, resetForm, values }) => (
         <FormContainer className={className}>
-          <ControlLabelsWithMargin>
-            <ConnectorLabel
-              label={formatMessage({
-                id: "form.sourceConnector",
-              })}
-            >
-              <Connector name={source.name} icon={sourceIcon} />
-            </ConnectorLabel>
-            <ConnectorLabel
-              label={formatMessage({
-                id: "form.destinationConnector",
-              })}
-            >
-              <Connector name={destination.name} icon={destinationIcon} />
-            </ConnectorLabel>
-            <Field name="frequency">
-              {({ field }: FieldProps<string>) => (
+          <Section title={<FormattedMessage id="connection.transfer" />}>
+            <Field name="schedule">
+              {({ field, meta }: FieldProps<ScheduleProperties>) => (
                 <ConnectorLabel
-                  // error={!!fieldProps.meta.error && fieldProps.meta.touched}
+                  nextLine
+                  error={!!meta.error && meta.touched}
                   label={formatMessage({
                     id: "form.frequency",
+                  })}
+                  message={formatMessage({
+                    id: "form.frequency.message",
                   })}
                 >
                   <DropDown
                     {...field}
-                    data={dropdownData}
-                    onSelect={(item) => {
+                    error={!!meta.error && meta.touched}
+                    options={frequencies}
+                    onChange={(item) => {
                       if (onDropDownSelect) {
                         onDropDownSelect(item);
                       }
-                      setFieldValue("frequency", item.value);
+                      setFieldValue(field.name, item.value);
                     }}
                   />
                 </ConnectorLabel>
               )}
             </Field>
-          </ControlLabelsWithMargin>
-          <Field name="prefix">
-            {({ field }: FieldProps<string>) => (
-              <ControlLabelsWithMargin
-                label={formatMessage({
-                  id: "form.prefix",
-                })}
-                message={formatMessage({
-                  id: "form.prefix.message",
-                })}
-              >
-                <Input
-                  {...field}
-                  type="text"
-                  placeholder={formatMessage({
-                    id: `form.prefix.placeholder`,
-                  })}
-                />
-              </ControlLabelsWithMargin>
+          </Section>
+          <Section title={<FormattedMessage id="connection.streams" />}>
+            <FlexRow>
+              <Field
+                name="namespaceDefinition"
+                component={NamespaceDefinitionField}
+              />
+              <Field name="prefix">
+                {({ field }: FieldProps<string>) => (
+                  <ControlLabels
+                    nextLine
+                    label={formatMessage({
+                      id: "form.prefix",
+                    })}
+                    message={formatMessage({
+                      id: "form.prefix.message",
+                    })}
+                  >
+                    <Input
+                      {...field}
+                      type="text"
+                      placeholder={formatMessage({
+                        id: `form.prefix.placeholder`,
+                      })}
+                    />
+                  </ControlLabels>
+                )}
+              </Field>
+            </FlexRow>
+            {values.namespaceDefinition ===
+              ConnectionNamespaceDefinition.CustomFormat && (
+              <Field name="namespaceFormat">
+                {({ field, meta }: FieldProps<string>) => (
+                  <NamespaceFormatLabel
+                    nextLine
+                    error={!!meta.error}
+                    label={
+                      <FormattedMessage id="connectionForm.namespaceFormat.title" />
+                    }
+                    message={
+                      <FormattedMessage id="connectionForm.namespaceFormat.subtitle" />
+                    }
+                  >
+                    <Input
+                      {...field}
+                      error={!!meta.error}
+                      placeholder={formatMessage({
+                        id: "connectionForm.namespaceFormat.placeholder",
+                      })}
+                    />
+                  </NamespaceFormatLabel>
+                )}
+              </Field>
             )}
-          </Field>
-          <SchemaView
-            schema={newSchema}
-            destinationSupportedSyncModes={
-              destDefinition.supportedDestinationSyncModes
-            }
-            onChangeSchema={setNewSchema}
-            additionalControl={additionalSchemaControl}
-          />
-          {!isEditMode ? (
-            <EditLaterMessage
-              message={<FormattedMessage id="form.dataSync.message" />}
+            <Field
+              name="syncCatalog.streams"
+              destinationSupportedSyncModes={
+                destDefinition.supportedDestinationSyncModes
+              }
+              additionalControl={additionalSchemaControl}
+              component={SchemaField}
             />
-          ) : null}
-          {isEditMode ? (
-            <>
+            {isEditMode ? (
               <EditControls
-                isSubmitting={isLoading || isSubmitting}
-                isValid={isValid}
-                dirty={dirty || !equal(initialSchema, newSchema)}
+                isSubmitting={isSubmitting}
+                dirty={dirty}
                 resetForm={() => {
                   resetForm();
-                  setNewSchema(initialSchema);
                   if (onCancel) {
                     onCancel();
                   }
                 }}
                 successMessage={successMessage}
-                errorMessage={errorMessage}
+                errorMessage={
+                  errorMessage || !isValid
+                    ? formatMessage({ id: "connectionForm.validation.error" })
+                    : null
+                }
                 editSchemeMode={editSchemeMode}
               />
-              {modalIsOpen && (
-                <ResetDataModal
-                  modalType={ModalTypes.RESET_CHANGED_COLUMN}
-                  onClose={() => setResetModalIsOpen(false)}
-                  onSubmit={async () => {
-                    await onReset?.();
-                    setResetModalIsOpen(false);
-                  }}
+            ) : (
+              <>
+                <OperationsSection destDefinition={destDefinition} />
+                <EditLaterMessage
+                  message={<FormattedMessage id="form.dataSync.message" />}
                 />
-              )}
-            </>
-          ) : (
-            <BottomBlock
-              additionBottomControls={additionBottomControls}
-              isSubmitting={isSubmitting}
-              isValid={isValid}
-              dirty={dirty}
-              errorMessage={errorMessage}
+                <CreateControls
+                  additionBottomControls={additionBottomControls}
+                  isSubmitting={isSubmitting}
+                  isValid={isValid}
+                  errorMessage={
+                    errorMessage || !isValid
+                      ? formatMessage({ id: "connectionForm.validation.error" })
+                      : null
+                  }
+                />
+              </>
+            )}
+          </Section>
+          {modalIsOpen && (
+            <ResetDataModal
+              modalType={ModalTypes.RESET_CHANGED_COLUMN}
+              onClose={() => setResetModalIsOpen(false)}
+              onSubmit={async () => {
+                await onReset?.();
+                setResetModalIsOpen(false);
+              }}
             />
           )}
         </FormContainer>
@@ -239,4 +328,5 @@ const ConnectionForm: React.FC<ConnectionFormProps> = ({
   );
 };
 
+export type { ConnectionFormProps };
 export default ConnectionForm;

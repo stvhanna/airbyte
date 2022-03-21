@@ -1,48 +1,31 @@
-import React, { useEffect } from "react";
+import React from "react";
 import { FormattedMessage } from "react-intl";
-
-import { PageViewContainer } from "../../components/CenteredPageComponents";
-import { H1 } from "components/Titles";
-import { PreferencesForm } from "components";
-import config from "../../config";
-import { AnalyticsService } from "../../core/analytics/AnalyticsService";
-import useWorkspace from "../../components/hooks/services/useWorkspaceHook";
 import styled from "styled-components";
+
+import { PageViewContainer } from "components/CenteredPageComponents";
+import HeadTitle from "components/HeadTitle";
+import { H1 } from "components";
+import { PreferencesForm } from "views/Settings/PreferencesForm";
+
+import { useTrackPage } from "hooks/services/Analytics/useAnalyticsService";
+import useWorkspace from "hooks/services/useWorkspace";
 
 const Title = styled(H1)`
   margin-bottom: 47px;
 `;
 
 const PreferencesPage: React.FC = () => {
-  useEffect(() => {
-    AnalyticsService.page("Preferences Page");
-  }, []);
+  useTrackPage("Preferences Page");
 
   const { setInitialSetupConfig } = useWorkspace();
 
-  const onSubmit = async (data: {
-    email: string;
-    anonymousDataCollection: boolean;
-    news: boolean;
-    securityUpdates: boolean;
-  }) => {
-    await setInitialSetupConfig(data);
-
-    AnalyticsService.track("Specified Preferences", {
-      user_id: config.ui.workspaceId,
-      email: data.email,
-      anonymized: data.anonymousDataCollection,
-      subscribed_newsletter: data.news,
-      subscribed_security: data.securityUpdates,
-    });
-  };
-
   return (
     <PageViewContainer>
+      <HeadTitle titles={[{ id: "preferences.headTitle" }]} />
       <Title center>
         <FormattedMessage id={"preferences.title"} />
       </Title>
-      <PreferencesForm onSubmit={onSubmit} />
+      <PreferencesForm onSubmit={setInitialSetupConfig} />
     </PageViewContainer>
   );
 };

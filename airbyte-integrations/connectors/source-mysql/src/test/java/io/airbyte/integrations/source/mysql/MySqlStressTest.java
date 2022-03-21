@@ -1,41 +1,22 @@
 /*
- * MIT License
- *
- * Copyright (c) 2020 Airbyte
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * Copyright (c) 2021 Airbyte, Inc., all rights reserved.
  */
 
 package io.airbyte.integrations.source.mysql;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.google.common.collect.ImmutableMap;
+import com.mysql.cj.MysqlType;
 import io.airbyte.commons.json.Jsons;
+import io.airbyte.commons.string.Strings;
 import io.airbyte.db.Database;
 import io.airbyte.db.Databases;
 import io.airbyte.integrations.source.jdbc.AbstractJdbcSource;
 import io.airbyte.integrations.source.jdbc.test.JdbcStressTest;
 import java.sql.Connection;
 import java.sql.DriverManager;
-import java.sql.SQLException;
 import java.util.Optional;
-import org.apache.commons.lang3.RandomStringUtils;
+import java.util.concurrent.Callable;
 import org.jooq.SQLDialect;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
@@ -48,21 +29,21 @@ import org.testcontainers.containers.MySQLContainer;
 class MySqlStressTest extends JdbcStressTest {
 
   private static final String TEST_USER = "test";
-  private static final String TEST_PASSWORD = "test";
+  private static final Callable<String> TEST_PASSWORD = () -> "test";
   private static MySQLContainer<?> container;
 
   private JsonNode config;
   private Database database;
 
   @BeforeAll
-  static void init() throws SQLException {
+  static void init() throws Exception {
     container = new MySQLContainer<>("mysql:8.0")
         .withUsername(TEST_USER)
-        .withPassword(TEST_PASSWORD)
+        .withPassword(TEST_PASSWORD.call())
         .withEnv("MYSQL_ROOT_HOST", "%")
-        .withEnv("MYSQL_ROOT_PASSWORD", TEST_PASSWORD);
+        .withEnv("MYSQL_ROOT_PASSWORD", TEST_PASSWORD.call());
     container.start();
-    Connection connection = DriverManager.getConnection(container.getJdbcUrl(), "root", TEST_PASSWORD);
+    final Connection connection = DriverManager.getConnection(container.getJdbcUrl(), "root", TEST_PASSWORD.call());
     connection.createStatement().execute("GRANT ALL PRIVILEGES ON *.* TO '" + TEST_USER + "'@'%';\n");
   }
 
@@ -71,9 +52,9 @@ class MySqlStressTest extends JdbcStressTest {
     config = Jsons.jsonNode(ImmutableMap.builder()
         .put("host", container.getHost())
         .put("port", container.getFirstMappedPort())
-        .put("database", "db_" + RandomStringUtils.randomAlphabetic(10))
+        .put("database", Strings.addRandomSuffix("db", "_", 10))
         .put("username", TEST_USER)
-        .put("password", TEST_PASSWORD)
+        .put("password", TEST_PASSWORD.call())
         .build());
 
     database = Databases.createDatabase(
@@ -111,7 +92,7 @@ class MySqlStressTest extends JdbcStressTest {
   }
 
   @Override
-  public AbstractJdbcSource getSource() {
+  public AbstractJdbcSource<MysqlType> getSource() {
     return new MySqlSource();
   }
 

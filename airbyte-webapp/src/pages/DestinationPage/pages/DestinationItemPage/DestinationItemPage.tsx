@@ -1,15 +1,12 @@
 import React, { Suspense, useMemo, useState } from "react";
 import { FormattedMessage } from "react-intl";
-import styled from "styled-components";
 import { useResource } from "rest-hooks";
 
 import PageTitle from "components/PageTitle";
-import useRouter from "components/hooks/useRouterHook";
-import config from "config";
-import ContentCard from "components/ContentCard";
-import EmptyResource from "components/EmptyResourceBlock";
+import useRouter from "hooks/useRouter";
+import Placeholder, { ResourceTypes } from "components/Placeholder";
 import ConnectionResource from "core/resources/Connection";
-import { Routes } from "../../../routes";
+import { RoutePaths } from "pages/routes";
 import Breadcrumbs from "components/Breadcrumbs";
 import DestinationConnectionTable from "./components/DestinationConnectionTable";
 import DestinationResource from "core/resources/Destination";
@@ -17,7 +14,7 @@ import {
   ItemTabs,
   StepsTypes,
   TableItemTitle,
-} from "components/SourceAndDestinationsBlocks";
+} from "components/ConnectorBlocks";
 import DestinationSettings from "./components/DestinationSettings";
 import LoadingPage from "components/LoadingPage";
 import SourceResource from "core/resources/Source";
@@ -26,30 +23,29 @@ import DestinationDefinitionResource from "core/resources/DestinationDefinition"
 import { getIcon } from "utils/imageUtils";
 import ImageBlock from "components/ImageBlock";
 import SourceDefinitionResource from "core/resources/SourceDefinition";
-
-const Content = styled(ContentCard)`
-  margin: 0 32px 0 27px;
-`;
+import HeadTitle from "components/HeadTitle";
+import useWorkspace from "hooks/services/useWorkspace";
+import { DropDownRow } from "components";
 
 const DestinationItemPage: React.FC = () => {
-  const { query, push } = useRouter<{ id: string }>();
-
+  const { params, push } = useRouter<unknown, { id: string }>();
+  const { workspace } = useWorkspace();
   const [currentStep, setCurrentStep] = useState<string>(StepsTypes.OVERVIEW);
   const onSelectStep = (id: string) => setCurrentStep(id);
 
   const { sources } = useResource(SourceResource.listShape(), {
-    workspaceId: config.ui.workspaceId,
+    workspaceId: workspace.workspaceId,
   });
 
   const { sourceDefinitions } = useResource(
     SourceDefinitionResource.listShape(),
     {
-      workspaceId: config.ui.workspaceId,
+      workspaceId: workspace.workspaceId,
     }
   );
 
   const destination = useResource(DestinationResource.detailShape(), {
-    destinationId: query.id,
+    destinationId: params.id,
   });
 
   const destinationDefinition = useResource(
@@ -60,10 +56,10 @@ const DestinationItemPage: React.FC = () => {
   );
 
   const { connections } = useResource(ConnectionResource.listShape(), {
-    workspaceId: config.ui.workspaceId,
+    workspaceId: workspace.workspaceId,
   });
 
-  const onClickBack = () => push(Routes.Destination);
+  const onClickBack = () => push("..");
 
   const breadcrumbsData = [
     {
@@ -85,7 +81,7 @@ const DestinationItemPage: React.FC = () => {
           (sd) => sd.sourceDefinitionId === item.sourceDefinitionId
         );
         return {
-          text: item.name,
+          label: item.name,
           value: item.sourceId,
           img: <ImageBlock img={sourceDef?.icon} />,
         };
@@ -93,21 +89,17 @@ const DestinationItemPage: React.FC = () => {
     [sources, sourceDefinitions]
   );
 
-  const onSelect = (data: { value: string }) => {
-    if (data.value === "create-new-item") {
-      push({
-        pathname: `${Routes.Destination}${Routes.ConnectionNew}`,
-        state: { destinationId: destination.destinationId },
-      });
-    } else {
-      push({
-        pathname: `${Routes.Destination}${Routes.ConnectionNew}`,
-        state: {
-          sourceId: data.value,
-          destinationId: destination.destinationId,
-        },
-      });
-    }
+  const onSelect = (data: DropDownRow.IDataItem) => {
+    const path = `../${RoutePaths.ConnectionNew}`;
+    const state =
+      data.value === "create-new-item"
+        ? { destinationId: destination.destinationId }
+        : {
+            sourceId: data.value,
+            destinationId: destination.destinationId,
+          };
+
+    push(path, { state });
   };
 
   const renderContent = () => {
@@ -139,14 +131,7 @@ const DestinationItemPage: React.FC = () => {
             connections={connectionsWithDestination}
           />
         ) : (
-          <Content>
-            <EmptyResource
-              text={<FormattedMessage id="destinations.noSources" />}
-              description={
-                <FormattedMessage id="destinations.addSourceReplicateData" />
-              }
-            />
-          </Content>
+          <Placeholder resource={ResourceTypes.Sources} />
         )}
       </>
     );
@@ -154,7 +139,12 @@ const DestinationItemPage: React.FC = () => {
 
   return (
     <MainPageWithScroll
-      title={
+      headTitle={
+        <HeadTitle
+          titles={[{ id: "admin.destinations" }, { title: destination.name }]}
+        />
+      }
+      pageTitle={
         <PageTitle
           title={<Breadcrumbs data={breadcrumbsData} />}
           withLine

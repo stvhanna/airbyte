@@ -7,6 +7,9 @@
     "invoice": {
       "type": ["null", "string"]
     },
+    "invoice_id": {
+      "type": ["null", "string"]
+    },
     "subscription_item": {
       "type": ["null", "string"]
     },
@@ -42,12 +45,10 @@
       "type": ["null", "object"],
       "properties": {
         "start": {
-          "type": ["null", "string"],
-          "format": "date-time"
+          "type": ["null", "integer"]
         },
         "end": {
-          "type": ["null", "string"],
-          "format": "date-time"
+          "type": ["null", "number"]
         }
       }
     },
@@ -139,8 +140,7 @@
           "properties": {}
         },
         "updated": {
-          "type": ["null", "string"],
-          "format": "date-time"
+          "type": ["null", "number"]
         }
       }
     },

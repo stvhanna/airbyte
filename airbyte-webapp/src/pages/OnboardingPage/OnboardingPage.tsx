@@ -1,95 +1,89 @@
-import React, { useEffect, useState } from "react";
+import React, { Suspense, useEffect, useState } from "react";
 import styled from "styled-components";
-import { FormattedMessage } from "react-intl";
 import { useResource } from "rest-hooks";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faPlay } from "@fortawesome/free-solid-svg-icons";
+import { FormattedMessage } from "react-intl";
 
-import { H2 } from "components/Titles";
-import StepsMenu from "components/StepsMenu";
+import { Button } from "components";
+import HeadTitle from "components/HeadTitle";
+import useSource, { useSourceList } from "hooks/services/useSourceHook";
+import useDestination, {
+  useDestinationList,
+} from "hooks/services/useDestinationHook";
+import useConnection, {
+  useConnectionList,
+} from "hooks/services/useConnectionHook";
+import { ConnectionConfiguration } from "core/domain/connection";
+import SourceDefinitionResource from "core/resources/SourceDefinition";
+import DestinationDefinitionResource from "core/resources/DestinationDefinition";
+import useGetStepsConfig from "./useStepsConfig";
 import SourceStep from "./components/SourceStep";
 import DestinationStep from "./components/DestinationStep";
 import ConnectionStep from "./components/ConnectionStep";
-import SourceResource from "core/resources/Source";
-import DestinationResource from "core/resources/Destination";
-import config from "config";
-import UseGetStepsConfig, { StepsTypes } from "./components/useGetStepsConfig";
-import usePrepareDropdownLists from "./components/usePrepareDropdownLists";
-import { AnalyticsService } from "core/analytics/AnalyticsService";
-import useSource from "components/hooks/services/useSourceHook";
-import useDestination from "components/hooks/services/useDestinationHook";
-import Link from "components/Link";
-import Version from "components/Version";
-import { JobInfo } from "core/resources/Scheduler";
-import { ConnectionConfiguration } from "core/domain/connection";
+import WelcomeStep from "./components/WelcomeStep";
+import FinalStep from "./components/FinalStep";
+import LetterLine from "./components/LetterLine";
+import { StepType } from "./types";
+import { useAnalyticsService } from "hooks/services/Analytics/useAnalyticsService";
+import StepsCounter from "./components/StepsCounter";
+import LoadingPage from "components/LoadingPage";
+import useWorkspace from "hooks/services/useWorkspace";
+import useRouterHook from "hooks/useRouter";
+import { RoutePaths } from "pages/routes";
+import { JobInfo } from "../../core/domain/job/Job";
 
-const Content = styled.div<{ big?: boolean }>`
+const Content = styled.div<{ big?: boolean; medium?: boolean }>`
   width: 100%;
-  max-width: ${({ big }) => (big ? 1140 : 813)}px;
+  max-width: ${({ big, medium }) => (big ? 1140 : medium ? 730 : 550)}px;
   margin: 0 auto;
-  padding: 33px 0 13px;
+  padding: 75px 0 30px;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
   align-items: center;
   min-height: 100%;
-  overflow: hidden;
+  position: relative;
+  z-index: 2;
 `;
 
-const Main = styled.div`
+const Footer = styled.div`
   width: 100%;
+  height: 100px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px 0;
 `;
 
-const Img = styled.img`
-  text-align: center;
+const ScreenContent = styled.div`
   width: 100%;
-`;
-
-const MainTitle = styled(H2)`
-  margin-top: -39px;
-  font-family: ${({ theme }) => theme.highlightFont};
-  color: ${({ theme }) => theme.darkPrimaryColor};
-  letter-spacing: 0.008em;
-  font-weight: bold;
-`;
-
-const Subtitle = styled.div`
-  font-size: 14px;
-  line-height: 21px;
-  color: ${({ theme }) => theme.greyColor40};
-  text-align: center;
-  margin-top: 7px;
-`;
-
-const StepsCover = styled.div`
-  margin: 33px 0 28px;
-`;
-
-const TutorialLink = styled(Link)`
-  margin-top: 32px;
-  font-size: 14px;
-  text-align: center;
-  display: block;
-`;
-
-const PlayIcon = styled(FontAwesomeIcon)`
-  margin-right: 6px;
+  position: relative;
 `;
 
 const OnboardingPage: React.FC = () => {
+  const analyticsService = useAnalyticsService();
+  const { push } = useRouterHook();
+
   useEffect(() => {
-    AnalyticsService.page("Onboarding Page");
+    analyticsService.page("Onboarding Page");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const { sources } = useSourceList();
+  const { destinations } = useDestinationList();
+  const { connections } = useConnectionList();
+  const { syncConnection } = useConnection();
+  const { sourceDefinitions } = useResource(
+    SourceDefinitionResource.listShape(),
+    {}
+  );
+  const { destinationDefinitions } = useResource(
+    DestinationDefinitionResource.listShape(),
+    {}
+  );
 
   const { createSource, recreateSource } = useSource();
   const { createDestination, recreateDestination } = useDestination();
-
-  const { sources } = useResource(SourceResource.listShape(), {
-    workspaceId: config.ui.workspaceId,
-  });
-  const { destinations } = useResource(DestinationResource.listShape(), {
-    workspaceId: config.ui.workspaceId,
-  });
+  const { finishOnboarding } = useWorkspace();
 
   const [successRequest, setSuccessRequest] = useState(false);
   const [errorStatusRequest, setErrorStatusRequest] = useState<{
@@ -103,148 +97,161 @@ const OnboardingPage: React.FC = () => {
     setErrorStatusRequest(null);
   };
 
-  const { currentStep, steps, setCurrentStep } = UseGetStepsConfig(
+  const { currentStep, setCurrentStep, steps } = useGetStepsConfig(
     !!sources.length,
     !!destinations.length,
+    !!connections.length,
     afterUpdateStep
   );
 
-  const {
-    sourcesDropDownData,
-    destinationsDropDownData,
-    getSourceDefinitionById,
-    getDestinationDefinitionById,
-  } = usePrepareDropdownLists();
+  const getSourceDefinitionById = (id: string) =>
+    sourceDefinitions.find((item) => item.sourceDefinitionId === id);
 
-  const onSubmitSourceStep = async (values: {
-    name: string;
-    serviceType: string;
-    sourceId?: string;
-    connectionConfiguration?: ConnectionConfiguration;
-  }) => {
-    setErrorStatusRequest(null);
-    const sourceConnector = getSourceDefinitionById(values.serviceType);
+  const getDestinationDefinitionById = (id: string) =>
+    destinationDefinitions.find((item) => item.destinationDefinitionId === id);
 
-    try {
-      if (!!sources.length) {
-        await recreateSource({
-          values,
-          sourceId: sources[0].sourceId,
-        });
-      } else {
-        await createSource({ values, sourceConnector });
-      }
-
-      setSuccessRequest(true);
-      setTimeout(() => {
-        setSuccessRequest(false);
-        setCurrentStep(StepsTypes.CREATE_DESTINATION);
-      }, 2000);
-    } catch (e) {
-      setErrorStatusRequest(e);
-    }
-  };
-
-  const onSubmitDestinationStep = async (values: {
-    name: string;
-    serviceType: string;
-    destinationDefinitionId?: string;
-    connectionConfiguration?: ConnectionConfiguration;
-  }) => {
-    setErrorStatusRequest(null);
-    const destinationConnector = getDestinationDefinitionById(
-      values.serviceType
-    );
-
-    try {
-      if (!!destinations.length) {
-        await recreateDestination({
-          values,
-          destinationId: destinations[0].destinationId,
-        });
-      } else {
-        await createDestination({
-          values,
-          destinationConnector,
-        });
-      }
-
-      setSuccessRequest(true);
-      setTimeout(() => {
-        setSuccessRequest(false);
-        setCurrentStep(StepsTypes.SET_UP_CONNECTION);
-      }, 2000);
-    } catch (e) {
-      setErrorStatusRequest(e);
-    }
+  const handleFinishOnboarding = () => {
+    finishOnboarding();
+    push(RoutePaths.Connections);
   };
 
   const renderStep = () => {
-    if (currentStep === StepsTypes.CREATE_SOURCE) {
+    if (currentStep === StepType.INSTRUCTION) {
+      const onStart = () => setCurrentStep(StepType.CREATE_SOURCE);
+      //TODO: add username
+      return <WelcomeStep onSubmit={onStart} userName="" />;
+    }
+    if (currentStep === StepType.CREATE_SOURCE) {
+      const onSubmitSourceStep = async (values: {
+        name: string;
+        serviceType: string;
+        sourceId?: string;
+        connectionConfiguration?: ConnectionConfiguration;
+      }) => {
+        setErrorStatusRequest(null);
+        const sourceConnector = getSourceDefinitionById(values.serviceType);
+
+        try {
+          if (!!sources.length) {
+            await recreateSource({
+              values,
+              sourceId: sources[0].sourceId,
+            });
+          } else {
+            await createSource({ values, sourceConnector });
+          }
+
+          setSuccessRequest(true);
+          setTimeout(() => {
+            setSuccessRequest(false);
+            setCurrentStep(StepType.CREATE_DESTINATION);
+          }, 2000);
+        } catch (e) {
+          setErrorStatusRequest(e);
+        }
+      };
       return (
         <SourceStep
           afterSelectConnector={() => setErrorStatusRequest(null)}
-          jobInfo={errorStatusRequest?.response}
           onSubmit={onSubmitSourceStep}
-          dropDownData={sourcesDropDownData}
+          availableServices={sourceDefinitions}
           hasSuccess={successRequest}
           error={errorStatusRequest}
-          // source={sources.length && !successRequest ? sources[0] : undefined}
         />
       );
     }
-    if (currentStep === StepsTypes.CREATE_DESTINATION) {
+    if (currentStep === StepType.CREATE_DESTINATION) {
+      const onSubmitDestinationStep = async (values: {
+        name: string;
+        serviceType: string;
+        destinationDefinitionId?: string;
+        connectionConfiguration?: ConnectionConfiguration;
+      }) => {
+        setErrorStatusRequest(null);
+        const destinationConnector = getDestinationDefinitionById(
+          values.serviceType
+        );
+
+        try {
+          if (!!destinations.length) {
+            await recreateDestination({
+              values,
+              destinationId: destinations[0].destinationId,
+            });
+          } else {
+            await createDestination({
+              values,
+              destinationConnector,
+            });
+          }
+
+          setSuccessRequest(true);
+          setTimeout(() => {
+            setSuccessRequest(false);
+            setCurrentStep(StepType.SET_UP_CONNECTION);
+          }, 2000);
+        } catch (e) {
+          setErrorStatusRequest(e);
+        }
+      };
       return (
         <DestinationStep
           afterSelectConnector={() => setErrorStatusRequest(null)}
-          jobInfo={errorStatusRequest?.response}
           onSubmit={onSubmitDestinationStep}
-          dropDownData={destinationsDropDownData}
+          availableServices={destinationDefinitions}
           hasSuccess={successRequest}
           error={errorStatusRequest}
-          currentSourceDefinitionId={sources[0].sourceDefinitionId}
-          // destination={
-          //   destinations.length && !successRequest ? destinations[0] : undefined
-          // }
         />
       );
     }
 
+    if (currentStep === StepType.SET_UP_CONNECTION) {
+      return (
+        <ConnectionStep
+          errorStatus={errorStatusRequest?.status}
+          source={sources[0]}
+          destination={destinations[0]}
+          afterSubmitConnection={() => setCurrentStep(StepType.FINAl)}
+        />
+      );
+    }
+
+    const onSync = () => syncConnection(connections[0]);
+
     return (
-      <ConnectionStep
-        errorStatus={errorStatusRequest?.status}
-        source={sources[0]}
-        destination={destinations[0]}
-      />
+      <FinalStep connectionId={connections[0].connectionId} onSync={onSync} />
     );
   };
 
   return (
-    <Content big={currentStep === StepsTypes.SET_UP_CONNECTION}>
-      <Main>
-        <Img src="/welcome.svg" height={132} />
-        <MainTitle center>
-          <FormattedMessage id="onboarding.title" />
-        </MainTitle>
-        <Subtitle>
-          <FormattedMessage id="onboarding.subtitle" />
-        </Subtitle>
-        <StepsCover>
-          <StepsMenu data={steps} activeStep={currentStep} />
-        </StepsCover>
-        {renderStep()}
-        <TutorialLink
-          as="a"
-          clear
-          target="_blank"
-          href={config.ui.tutorialLink}
-        >
-          <PlayIcon icon={faPlay} />
-          <FormattedMessage id="onboarding.tutorial" />
-        </TutorialLink>
-      </Main>
-      <Version />
-    </Content>
+    <ScreenContent>
+      {currentStep === StepType.CREATE_SOURCE ? (
+        <LetterLine exit={successRequest} />
+      ) : currentStep === StepType.CREATE_DESTINATION ? (
+        <LetterLine onRight exit={successRequest} />
+      ) : null}
+      <Content
+        big={currentStep === StepType.SET_UP_CONNECTION}
+        medium={
+          currentStep === StepType.INSTRUCTION || currentStep === StepType.FINAl
+        }
+      >
+        <HeadTitle titles={[{ id: "onboarding.headTitle" }]} />
+        <StepsCounter steps={steps} currentStep={currentStep} />
+
+        <Suspense fallback={<LoadingPage />}>{renderStep()}</Suspense>
+
+        <Footer>
+          <Button secondary onClick={() => handleFinishOnboarding()}>
+            {currentStep === StepType.FINAl ? (
+              <FormattedMessage id="onboarding.closeOnboarding" />
+            ) : (
+              <FormattedMessage id="onboarding.skipOnboarding" />
+            )}
+          </Button>
+        </Footer>
+      </Content>
+    </ScreenContent>
   );
 };
 

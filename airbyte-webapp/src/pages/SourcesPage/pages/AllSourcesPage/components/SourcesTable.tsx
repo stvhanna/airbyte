@@ -1,15 +1,12 @@
 import React from "react";
-import { useResource } from "rest-hooks";
 
 import { ImplementationTable } from "components/EntityTable";
-import { Routes } from "pages/routes";
-import useRouter from "components/hooks/useRouterHook";
-import { Source } from "core/resources/Source";
-import ConnectionResource from "core/resources/Connection";
-import config from "config";
 import { getEntityTableData } from "components/EntityTable/utils";
 import { EntityTableDataItem } from "components/EntityTable/types";
-import SourceDefinitionResource from "core/resources/SourceDefinition";
+import useRouter from "hooks/useRouter";
+import { useConnectionList } from "hooks/services/useConnectionHook";
+import { useSourceDefinitionList } from "hooks/services/useSourceDefinition";
+import { Source } from "core/domain/connector";
 
 type IProps = {
   sources: Source[];
@@ -18,16 +15,8 @@ type IProps = {
 const SourcesTable: React.FC<IProps> = ({ sources }) => {
   const { push } = useRouter();
 
-  const { connections } = useResource(ConnectionResource.listShape(), {
-    workspaceId: config.ui.workspaceId,
-  });
-
-  const { sourceDefinitions } = useResource(
-    SourceDefinitionResource.listShape(),
-    {
-      workspaceId: config.ui.workspaceId,
-    }
-  );
+  const { connections } = useConnectionList();
+  const { sourceDefinitions } = useSourceDefinitionList();
 
   const data = getEntityTableData(
     sources,
@@ -36,8 +25,7 @@ const SourcesTable: React.FC<IProps> = ({ sources }) => {
     "source"
   );
 
-  const clickRow = (source: EntityTableDataItem) =>
-    push(`${Routes.Source}/${source.entityId}`);
+  const clickRow = (source: EntityTableDataItem) => push(`${source.entityId}`);
 
   return (
     <ImplementationTable data={data} onClickRow={clickRow} entity="source" />

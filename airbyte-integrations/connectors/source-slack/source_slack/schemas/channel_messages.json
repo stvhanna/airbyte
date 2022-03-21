@@ -38,8 +38,7 @@
           "type": ["null", "string"]
         },
         "updated": {
-          "type": ["null", "string"],
-          "format": "date-time"
+          "type": ["null", "string"]
         }
       },
       "type": ["null", "object"]
@@ -184,8 +183,10 @@
       "type": ["null", "string"]
     },
     "ts": {
-      "type": ["null", "string"],
-      "format": "date-time"
+      "type": ["null", "string"]
+    },
+    "float_ts": {
+      "type": ["null", "number"]
     },
     "type": {
       "type": ["null", "string"]

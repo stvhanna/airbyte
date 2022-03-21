@@ -1,127 +1,168 @@
 /*
- * MIT License
- *
- * Copyright (c) 2020 Airbyte
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * Copyright (c) 2021 Airbyte, Inc., all rights reserved.
  */
 
 package io.airbyte.workers.process;
 
+import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
+import io.airbyte.config.ResourceRequirements;
+import io.airbyte.config.WorkerEnvConstants;
 import io.airbyte.workers.WorkerException;
 import java.nio.file.Path;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import java.util.Map;
 
 public class AirbyteIntegrationLauncher implements IntegrationLauncher {
-
-  private final static Logger LOGGER = LoggerFactory.getLogger(AirbyteIntegrationLauncher.class);
 
   private final String jobId;
   private final int attempt;
   private final String imageName;
-  private final ProcessBuilderFactory pbf;
+  private final ProcessFactory processFactory;
+  private final ResourceRequirements resourceRequirement;
 
-  public AirbyteIntegrationLauncher(long jobId, int attempt, final String imageName, final ProcessBuilderFactory pbf) {
-    this(String.valueOf(jobId), attempt, imageName, pbf);
-  }
-
-  public AirbyteIntegrationLauncher(String jobId, int attempt, final String imageName, final ProcessBuilderFactory pbf) {
+  public AirbyteIntegrationLauncher(final String jobId,
+                                    final int attempt,
+                                    final String imageName,
+                                    final ProcessFactory processFactory,
+                                    final ResourceRequirements resourceRequirement) {
     this.jobId = jobId;
     this.attempt = attempt;
     this.imageName = imageName;
-    this.pbf = pbf;
+    this.processFactory = processFactory;
+    this.resourceRequirement = resourceRequirement;
   }
 
   @Override
-  public ProcessBuilder spec(final Path jobRoot) throws WorkerException {
-    return pbf.create(
+  public Process spec(final Path jobRoot) throws WorkerException {
+    return processFactory.create(
         jobId,
         attempt,
         jobRoot,
         imageName,
+        false,
+        Collections.emptyMap(),
         null,
+        resourceRequirement,
+        Map.of(KubeProcessFactory.JOB_TYPE, KubeProcessFactory.SPEC_JOB),
+        getWorkerMetadata(),
+        Collections.emptyMap(),
         "spec");
   }
 
   @Override
-  public ProcessBuilder check(final Path jobRoot, final String configFilename) throws WorkerException {
-    return pbf.create(
+  public Process check(final Path jobRoot, final String configFilename, final String configContents) throws WorkerException {
+    return processFactory.create(
         jobId,
         attempt,
         jobRoot,
         imageName,
+        false,
+        ImmutableMap.of(configFilename, configContents),
         null,
+        resourceRequirement,
+        Map.of(KubeProcessFactory.JOB_TYPE, KubeProcessFactory.CHECK_JOB),
+        getWorkerMetadata(),
+        Collections.emptyMap(),
         "check",
         "--config", configFilename);
   }
 
   @Override
-  public ProcessBuilder discover(final Path jobRoot, final String configFilename) throws WorkerException {
-    return pbf.create(
+  public Process discover(final Path jobRoot, final String configFilename, final String configContents) throws WorkerException {
+    return processFactory.create(
         jobId,
         attempt,
         jobRoot,
         imageName,
+        false,
+        ImmutableMap.of(configFilename, configContents),
         null,
+        resourceRequirement,
+        Map.of(KubeProcessFactory.JOB_TYPE, KubeProcessFactory.DISCOVER_JOB),
+        getWorkerMetadata(),
+        Collections.emptyMap(),
         "discover",
         "--config", configFilename);
   }
 
   @Override
-  public ProcessBuilder read(final Path jobRoot,
-                             final String configFilename,
-                             final String catalogFilename,
-                             final String stateFilename)
+  public Process read(final Path jobRoot,
+                      final String configFilename,
+                      final String configContents,
+                      final String catalogFilename,
+                      final String catalogContents,
+                      final String stateFilename,
+                      final String stateContents)
       throws WorkerException {
     final List<String> arguments = Lists.newArrayList(
         "read",
         "--config", configFilename,
         "--catalog", catalogFilename);
 
+    final Map<String, String> files = new HashMap<>();
+    files.put(configFilename, configContents);
+    files.put(catalogFilename, catalogContents);
+
     if (stateFilename != null) {
       arguments.add("--state");
       arguments.add(stateFilename);
+
+      Preconditions.checkNotNull(stateContents);
+      files.put(stateFilename, stateContents);
     }
 
-    return pbf.create(
+    return processFactory.create(
         jobId,
         attempt,
         jobRoot,
         imageName,
+        false,
+        files,
         null,
-        arguments);
+        resourceRequirement,
+        Map.of(KubeProcessFactory.JOB_TYPE, KubeProcessFactory.SYNC_JOB, KubeProcessFactory.SYNC_STEP, KubeProcessFactory.READ_STEP),
+        getWorkerMetadata(),
+        Collections.emptyMap(),
+        arguments.toArray(new String[arguments.size()]));
   }
 
   @Override
-  public ProcessBuilder write(Path jobRoot, String configFilename, String catalogFilename) throws WorkerException {
-    return pbf.create(
+  public Process write(final Path jobRoot,
+                       final String configFilename,
+                       final String configContents,
+                       final String catalogFilename,
+                       final String catalogContents)
+      throws WorkerException {
+    final Map<String, String> files = ImmutableMap.of(
+        configFilename, configContents,
+        catalogFilename, catalogContents);
+
+    return processFactory.create(
         jobId,
         attempt,
         jobRoot,
         imageName,
+        true,
+        files,
         null,
+        resourceRequirement,
+        Map.of(KubeProcessFactory.JOB_TYPE, KubeProcessFactory.SYNC_JOB, KubeProcessFactory.SYNC_STEP, KubeProcessFactory.WRITE_STEP),
+        getWorkerMetadata(),
+        Collections.emptyMap(),
         "write",
         "--config", configFilename,
         "--catalog", catalogFilename);
+  }
+
+  private Map<String, String> getWorkerMetadata() {
+    return Map.of(
+        WorkerEnvConstants.WORKER_CONNECTOR_IMAGE, imageName,
+        WorkerEnvConstants.WORKER_JOB_ID, jobId,
+        WorkerEnvConstants.WORKER_JOB_ATTEMPT, String.valueOf(attempt));
   }
 
 }

@@ -11,7 +11,7 @@ Exchangerates API as an example since it is both simple but demonstrates a lot o
 * Docker
 * NodeJS (only used to generate the connector). We'll remove the NodeJS dependency soon.
 
-All the commands below assume that `python` points to a version of python >=3.7.9. On some systems, `python` points to a Python2 installation and `python3` points to Python3. If this is the case on your machine, substitute all `python` commands in this guide with `python3`.
+All the commands below assume that `python` points to a version of python >=3.7.0. On some systems, `python` points to a Python2 installation and `python3` points to Python3. If this is the case on your machine, substitute all `python` commands in this guide with `python3`.
 
 ## Checklist
 * Step 1: Create the source using the template
@@ -33,15 +33,12 @@ Airbyte provides a code generator which bootstraps the scaffolding for our conne
 
 ```bash
 $ cd airbyte-integrations/connector-templates/generator # assumes you are starting from the root of the Airbyte project.
-# Install NPM from https://www.npmjs.com/get-npm if you don't have it
-$ npm install
-$ npm run generate
+$ ./generate.sh
 ```
 
 Select the `Python HTTP CDK Source` template and then input the name of your connector. For this walk-through we will refer to our source as `python-http-example`. The finalized source code for this tutorial can be found [here](https://github.com/airbytehq/airbyte/tree/master/airbyte-integrations/connectors/source-python-http-tutorial).
 
-The source we will build in this tutorial will pull data from the [Rates API](ratesapi.io), a free and open API which 
-documents historical exchange rates for fiat currencies.  
+The source we will build in this tutorial will pull data from the [Rates API](https://exchangeratesapi.io), a free and open API which documents historical exchange rates for fiat currencies.  
 
 ### Step 2: Install dependencies the newly generated source
 Now that you've generated the module, let's navigate to its directory and install dependencies:
@@ -122,7 +119,7 @@ Each connector declares the inputs it needs to read data from the underlying dat
 
 The simplest way to implement this is by creating a `.json` file in `source_<name>/spec.json` which describes your connector's inputs according to the [ConnectorSpecification](https://github.com/airbytehq/airbyte/blob/master/airbyte-protocol/models/src/main/resources/airbyte_protocol/airbyte_protocol.yaml#L211) schema. This is a good place to start when developing your source. Using JsonSchema, define what the inputs are \(e.g. username and password\). Here's [an example](https://github.com/airbytehq/airbyte/blob/master/airbyte-integrations/connectors/source-freshdesk/source_freshdesk/spec.json) of what the `spec.json` looks like for the Freshdesk API source.
 
-For more details on what the spec is, you can read about the Airbyte Protocol [here](../architecture/airbyte-specification.md).
+For more details on what the spec is, you can read about the Airbyte Protocol [here](https://docs.airbyte.io/understanding-airbyte/airbyte-specification#the-airbyte-protocol).
 
 The generated code that Airbyte provides, handles implementing the `spec` method for you. It assumes that there will be a file called `spec.json` in the same directory as `source.py`. If you have declared the necessary JsonSchema in `spec.json` you should be done with this step.
 
@@ -219,7 +216,7 @@ While developing, we recommend storing configs which contain secrets in `secrets
 
 ### Step 5: Declare the schema of your streams
 
-The `discover` method of the Airbyte Protocol returns an `AirbyteCatalog`: an object which declares all the streams output by a connector and their schemas. It also declares the sync modes supported by the stream (full refresh or incremental). See the [catalog tutorial](https://docs.airbyte.io/tutorials/beginners-guide-to-catalog) for more information.
+The `discover` method of the Airbyte Protocol returns an `AirbyteCatalog`: an object which declares all the streams output by a connector and their schemas. It also declares the sync modes supported by the stream (full refresh or incremental). See the [catalog tutorial](https://docs.airbyte.io/understanding-airbyte/beginners-guide-to-catalog) for more information.
 
 This is a simple task with the Airbyte CDK. For each stream in our connector we'll need to:
 1. Create a python `class` in `source.py` which extends `HttpStream`
@@ -230,7 +227,7 @@ Let's create a class in `source.py` which extends `HttpStream`. You'll notice th
 We'll begin by creating a stream to represent the data that we're pulling from the Exchange Rates API: 
 ```python
 class ExchangeRates(HttpStream):
-    url_base = "https://api.ratesapi.io/"
+    url_base = "https://api.exchangeratesapi.io/"
 
     def next_page_token(self, response: requests.Response) -> Optional[Mapping[str, Any]]:
         # The API does not offer pagination, so we return None to indicate there are no more pages in the response
@@ -292,7 +289,7 @@ You can also dynamically define schemas, but that's beyond the scope of this tut
 ### Step 6: Read data from the API
 Describing schemas is good and all, but at some point we have to start reading data! So let's get to work. But before, let's describe what we're about to do: 
 
-The `HttpStream` superclass, like described in the [concepts documentation](../../CDK-README.md), is facilitating reading data from HTTP endpoints. It contains built-in functions or helpers for: 
+The `HttpStream` superclass, like described in the [concepts documentation](../concepts/README.md), is facilitating reading data from HTTP endpoints. It contains built-in functions or helpers for:
 * authentication
 * pagination
 * handling rate limiting or transient errors
@@ -307,6 +304,13 @@ Optionally, we can provide additional inputs to customize requests:
 * request parameters and headers
 * how to recognize rate limit errors, and how long to wait (by default it retries 429 and 5XX errors using exponential backoff)
 * HTTP method and request body if applicable
+* configure exponential backoff policy
+
+Backoff policy options:
+
+- `retry_factor` Specifies factor for exponential backoff policy (by default is 5)
+- `max_retries` Specifies maximum amount of retries for backoff policy (by default is 5)
+- `raise_on_http_errors` If set to False, allows opting-out of raising HTTP code exception (by default is True)
 
 There are many other customizable options - you can find them in the [`base_python.cdk.streams.http.HttpStream`](https://github.com/airbytehq/airbyte/blob/master/airbyte-integrations/bases/base-python/base_python/cdk/streams/http.py) class. 
 
@@ -316,7 +320,7 @@ Let's begin by pulling data for the last day's rates by using the `/latest` endp
 
 ```python
 class ExchangeRates(HttpStream):
-    url_base = "https://api.ratesapi.io/"
+    url_base = "https://api.exchangeratesapi.io/"
     
     def __init__(self, base: str, **kwargs):
         super().__init__()
@@ -375,7 +379,7 @@ def streams(self, config: Mapping[str, Any]) -> List[Stream]:
 
 We're now ready to query the API! 
 
-To do this, we'll need a [ConfiguredCatalog](https://docs.airbyte.io/tutorials/beginners-guide-to-catalog). We've prepared one [here](http_api_source_assets/configured_catalog.json) -- download this and place it in `sample_files/configured_catalog.json`. Then run: 
+To do this, we'll need a [ConfiguredCatalog](https://docs.airbyte.io/understanding-airbyte/beginners-guide-to-catalog). We've prepared one [here](http_api_source_assets/configured_catalog.json) -- download this and place it in `sample_files/configured_catalog.json`. Then run:
 
 ```
  python main_dev.py read --config sample_files/config.json --catalog sample_files/configured_catalog.json
@@ -392,13 +396,15 @@ There we have it - a stream which reads data in just a few lines of code!
 We theoretically _could_ stop here and call it a connector. But let's give adding incremental sync a shot.
 
 #### Adding incremental sync
+
 To add incremental sync, we'll do a few things: 
-1. Pass the `start_date` param input by the user into the stream.
-2. Declare the stream's `cursor_field`.
-3. Implement the `get_updated_state` method.
-4. Implement the `stream_slices` method.
-5. Update the `path` method to specify the date to pull exchange rates for.
-6. Update the configured catalog to use `incremental` sync when we're testing the stream.
+1. Pass the `start_date` param input by the user into the stream. 
+2. Declare the stream's `cursor_field`. 
+3. Declare the stream's property `_cursor_value` to hold the state value
+4. Add `IncrementalMixin` to the list of the ancestors of the stream and implement setter and getter of the `state`.
+5. Implement the `stream_slices` method. 
+6. Update the `path` method to specify the date to pull exchange rates for. 
+7. Update the configured catalog to use `incremental` sync when we're testing the stream.
 
 We'll describe what each of these methods do below. Before we begin, it may help to familiarize yourself with how incremental sync works in Airbyte by reading the [docs on incremental](https://docs.airbyte.io/architecture/connections/incremental-append). 
 
@@ -420,33 +426,47 @@ Let's also add this parameter to the constructor and declare the `cursor_field`:
 from datetime import datetime, timedelta
 
 
-class ExchangeRates(HttpStream):
-    url_base = "https://api.ratesapi.io/"
+class ExchangeRates(HttpStream, IncrementalMixin):
+    url_base = "https://api.exchangeratesapi.io/"
     cursor_field = "date"
 
     def __init__(self, base: str, start_date: datetime, **kwargs):
         super().__init__()
         self.base = base
         self.start_date = start_date
+        self._cursor_value = None
 ```
 
 Declaring the `cursor_field` informs the framework that this stream now supports incremental sync. The next time you run `python main_dev.py discover --config sample_files/config.json` you'll find that the `supported_sync_modes` field now also contains `incremental`.
 
 But we're not quite done with supporting incremental, we have to actually emit state! We'll structure our state object very simply: it will be a `dict` whose single key is `'date'` and value is the date of the last day we synced data from. For example, `{'date': '2021-04-26'}` indicates the connector previously read data up until April 26th and therefore shouldn't re-read anything before April 26th.
 
-Let's do this by implementing the `get_updated_state` method inside the `ExchangeRates` class.
+Let's do this by implementing the getter and setter for the `state` inside the `ExchangeRates` class.
 
 ```python
-    def get_updated_state(self, current_stream_state: MutableMapping[str, Any], latest_record: Mapping[str, Any]) -> Mapping[str, any]:
-        # This method is called once for each record returned from the API to compare the cursor field value in that record with the current state
-        # we then return an updated state object. If this is the first time we run a sync or no state was passed, current_stream_state will be None.
-        if current_stream_state is not None and 'date' in current_stream_state:
-            current_parsed_date = datetime.strptime(current_stream_state['date'], '%Y-%m-%d')
-            latest_record_date = datetime.strptime(latest_record['date'], '%Y-%m-%d')
-            return {'date': max(current_parsed_date, latest_record_date).strftime('%Y-%m-%d')}
+    @property
+    def state(self) -> Mapping[str, Any]:
+        if self._cursor_value:
+            return {self.cursor_field: self._cursor_value.strftime('%Y-%m-%d')}
         else:
-            return {'date': self.start_date.strftime('%Y-%m-%d')}
-```  
+            return {self.cursor_field: self.start_date.strftime('%Y-%m-%d')}
+    
+    @state.setter
+    def state(self, value: Mapping[str, Any]):
+       self._cursor_value = datetime.strptime(value[self.cursor_field], '%Y-%m-%d')
+```
+
+Update internal state `cursor_value` inside `read_records` method
+
+```python
+    def read_records(self, *args, **kwargs) -> Iterable[Mapping[str, Any]]:
+        for record in super().read_records(*args, **kwargs):
+            if self._cursor_value:
+                latest_record_date = datetime.strptime(latest_record[self.cursor_field], '%Y-%m-%d')
+                self._cursor_value = max(self._cursor_value, latest_record_date)
+            yield record
+
+```
 
 This implementation compares the date from the latest record with the date in the current state and takes the maximum as the "new" state object.
 
@@ -507,7 +527,7 @@ You should see that only the record from the last date is being synced! This is 
 With that, we've implemented incremental sync for our connector! 
 
 ### Step 7: Use the connector in Airbyte
-To use your connector in your own installation of Airbyte, build the docker image for your container by running `docker build . -t airbyte/source-python-http-example:dev`. Then, follow the instructions from the [building a connector the hard way tutorial](https://docs.airbyte.io/tutorials/build-a-connector-the-hard-way#use-the-connector-in-the-airbyte-ui) for using the connector in the Airbyte UI, replacing the name as appropriate. 
+To use your connector in your own installation of Airbyte, build the docker image for your container by running `docker build . -t airbyte/source-python-http-example:dev`. Then, follow the instructions from the [building a python source tutorial](https://docs.airbyte.io/connector-development/tutorials/building-a-python-source) for using the connector in the Airbyte UI, replacing the name as appropriate.
 
 Note: your built docker image must be accessible to the `docker` daemon running on the Airbyte node. If you're doing this tutorial locally, these instructions are sufficient. Otherwise you may need to push your Docker image to Dockerhub.
 
@@ -518,10 +538,10 @@ Add any relevant unit tests to the `unit_tests` directory. Unit tests should **n
 You can run the tests using `python -m pytest -s unit_tests`
 
 #### Integration Tests
-Place any integration tests in the `integration_tests` directory such that they can be [discovered by pytest](https://docs.pytest.org/en/reorganize-docs/new-docs/user/naming_conventions.html).
+Place any integration tests in the `integration_tests` directory such that they can be [discovered by pytest](https://docs.pytest.org/en/6.2.x/goodpractices.html#conventions-for-python-test-discovery).
 
 #### Standard Tests
-Standard tests are a fixed set of tests Airbyte provides that every Airbyte source connector must pass. While they're only required if you intend to submit your connector to Airbyte, you might find them helpful in any case. See [Testing your connectors](https://docs.airbyte.io/contributing-to-airbyte/building-new-connector/testing-connectors)
+Standard tests are a fixed set of tests Airbyte provides that every Airbyte source connector must pass. While they're only required if you intend to submit your connector to Airbyte, you might find them helpful in any case. See [Testing your connectors](https://docs.airbyte.io/connector-development/testing-connectors)
 
 If you want to submit this connector to become a default connector within Airbyte, follow 
-steps 8 onwards from the [Python source checklist](https://docs.airbyte.io/tutorials/building-a-python-source#step-8-set-up-standard-tests)
+steps 8 onwards from the [Python source checklist](https://docs.airbyte.io/connector-development/tutorials/building-a-python-source#step-8-set-up-standard-tests)

@@ -1,42 +1,36 @@
 import React, { useState } from "react";
 import { FormattedMessage } from "react-intl";
-import { useResource } from "rest-hooks";
 
-import ContentCard from "components/ContentCard";
-import ServiceForm from "components/ServiceForm";
-import ConnectionBlock from "components/ConnectionBlock";
-import SourceDefinitionResource from "core/resources/SourceDefinition";
-import { AnalyticsService } from "core/analytics/AnalyticsService";
-import usePrepareDropdownLists from "./usePrepareDropdownLists";
-import { useDestinationDefinitionSpecificationLoad } from "components/hooks/services/useDestinationHook";
+import { LogsRequestError } from "core/request/LogsRequestError";
+
+import { useDestinationDefinitionSpecificationLoad } from "hooks/services/useDestinationHook";
 import { createFormErrorMessage } from "utils/errorStatusMessage";
-import { JobInfo } from "core/resources/Scheduler";
-import { JobsLogItem } from "components/JobItem";
-import SkipOnboardingButton from "./SkipOnboardingButton";
 import { ConnectionConfiguration } from "core/domain/connection";
+import { DestinationDefinition } from "core/domain/connector";
+
+import { ConnectorCard } from "views/Connector/ConnectorCard";
+import TitlesBlock from "./TitlesBlock";
+import HighlightedText from "./HighlightedText";
+import { useAnalyticsService } from "hooks/services/Analytics/useAnalyticsService";
 
 type IProps = {
-  dropDownData: { value: string; text: string; icon: string }[];
-  hasSuccess?: boolean;
+  availableServices: DestinationDefinition[];
   onSubmit: (values: {
     name: string;
     serviceType: string;
     destinationDefinitionId?: string;
     connectionConfiguration?: ConnectionConfiguration;
   }) => void;
+  hasSuccess?: boolean;
   error?: null | { message?: string; status?: number };
-  currentSourceDefinitionId: string;
-  jobInfo?: JobInfo;
   afterSelectConnector?: () => void;
 };
 
 const DestinationStep: React.FC<IProps> = ({
   onSubmit,
-  dropDownData,
+  availableServices,
   hasSuccess,
   error,
-  currentSourceDefinitionId,
-  jobInfo,
   afterSelectConnector,
 }) => {
   const [destinationDefinitionId, setDestinationDefinitionId] = useState("");
@@ -44,14 +38,14 @@ const DestinationStep: React.FC<IProps> = ({
     destinationDefinitionSpecification,
     isLoading,
   } = useDestinationDefinitionSpecificationLoad(destinationDefinitionId);
-  const currentSource = useResource(SourceDefinitionResource.detailShape(), {
-    sourceDefinitionId: currentSourceDefinitionId,
-  });
-  const { getDestinationDefinitionById } = usePrepareDropdownLists();
 
-  const onDropDownSelect = (sourceId: string) => {
-    const destinationConnector = getDestinationDefinitionById(sourceId);
-    AnalyticsService.track("New Destination - Action", {
+  const analyticsService = useAnalyticsService();
+
+  const onDropDownSelect = (destinationDefinition: string) => {
+    const destinationConnector = availableServices.find(
+      (s) => s.destinationDefinitionId === destinationDefinition
+    );
+    analyticsService.track("New Destination - Action", {
       action: "Select a connector",
       connector_destination: destinationConnector?.name,
       connector_destination_definition_id:
@@ -62,7 +56,7 @@ const DestinationStep: React.FC<IProps> = ({
       afterSelectConnector();
     }
 
-    setDestinationDefinitionId(sourceId);
+    setDestinationDefinitionId(destinationDefinition);
   };
   const onSubmitForm = async (values: {
     name: string;
@@ -79,33 +73,33 @@ const DestinationStep: React.FC<IProps> = ({
 
   return (
     <>
-      <ConnectionBlock
-        itemFrom={{ name: currentSource.name, icon: currentSource.icon }}
-      />
-      <ContentCard
-        title={<FormattedMessage id="onboarding.destinationSetUp" />}
+      <TitlesBlock
+        title={
+          <FormattedMessage
+            id="onboarding.createFirstDestination"
+            values={{
+              name: (name: React.ReactNode[]) => (
+                <HighlightedText>{name}</HighlightedText>
+              ),
+            }}
+          />
+        }
       >
-        <ServiceForm
-          additionBottomControls={
-            <SkipOnboardingButton step="destination connection" />
-          }
-          allowChangeConnector
-          onDropDownSelect={onDropDownSelect}
-          onSubmit={onSubmitForm}
-          hasSuccess={hasSuccess}
-          formType="destination"
-          availableServices={dropDownData}
-          errorMessage={errorMessage}
-          specifications={
-            destinationDefinitionSpecification?.connectionSpecification
-          }
-          documentationUrl={
-            destinationDefinitionSpecification?.documentationUrl
-          }
-          isLoading={isLoading}
-        />
-        <JobsLogItem jobInfo={jobInfo} />
-      </ContentCard>
+        <FormattedMessage id="onboarding.createFirstDestination.text" />
+      </TitlesBlock>
+      <ConnectorCard
+        full
+        jobInfo={LogsRequestError.extractJobInfo(error)}
+        formType="destination"
+        allowChangeConnector
+        onServiceSelect={onDropDownSelect}
+        onSubmit={onSubmitForm}
+        hasSuccess={hasSuccess}
+        availableServices={availableServices}
+        errorMessage={errorMessage}
+        selectedConnector={destinationDefinitionSpecification}
+        isLoading={isLoading}
+      />
     </>
   );
 };

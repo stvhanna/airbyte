@@ -1,15 +1,10 @@
 import { MutateShape, ReadShape, Resource, SchemaDetail } from "rest-hooks";
-import BaseResource from "./BaseResource";
 
-export interface DestinationDefinition {
-  destinationDefinitionId: string;
-  name: string;
-  dockerRepository: string;
-  dockerImageTag: string;
-  latestDockerImageTag: string;
-  documentationUrl: string;
-  icon: string;
-}
+import { getService } from "core/servicesProvider";
+
+import BaseResource from "./BaseResource";
+import { DestinationDefinitionService } from "core/domain/connector/DestinationDefinitionService";
+import { DestinationDefinition } from "core/domain/connector";
 
 export default class DestinationDefinitionResource
   extends BaseResource
@@ -84,6 +79,14 @@ export default class DestinationDefinitionResource
   ): MutateShape<SchemaDetail<DestinationDefinition>> {
     return {
       ...super.partialUpdateShape(),
+      fetch(
+        _: Readonly<Record<string, unknown>>,
+        body: DestinationDefinition
+      ): Promise<DestinationDefinition> {
+        return getService<DestinationDefinitionService>(
+          "DestinationDefinitionService"
+        ).update(body);
+      },
       schema: this,
     };
   }

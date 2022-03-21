@@ -1,4 +1,6 @@
-from .client import Client
+#
+# Copyright (c) 2021 Airbyte, Inc., all rights reserved.
+#
 from .source import SourceFacebookMarketing
 
-__all__ = ["SourceFacebookMarketing", "Client"]
+__all__ = ["SourceFacebookMarketing"]

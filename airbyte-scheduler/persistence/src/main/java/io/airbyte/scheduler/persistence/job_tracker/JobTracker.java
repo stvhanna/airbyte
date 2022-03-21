@@ -1,65 +1,45 @@
 /*
- * MIT License
- *
- * Copyright (c) 2020 Airbyte
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * Copyright (c) 2021 Airbyte, Inc., all rights reserved.
  */
 
 package io.airbyte.scheduler.persistence.job_tracker;
 
+import static java.util.Collections.emptyMap;
+import static java.util.Collections.singletonMap;
+
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableMap.Builder;
 import io.airbyte.analytics.TrackingClient;
-import io.airbyte.analytics.TrackingClientSingleton;
+import io.airbyte.commons.json.Jsons;
 import io.airbyte.commons.lang.Exceptions;
 import io.airbyte.commons.map.MoreMaps;
 import io.airbyte.config.JobConfig;
 import io.airbyte.config.JobConfig.ConfigType;
-import io.airbyte.config.JobOutput;
 import io.airbyte.config.StandardCheckConnectionOutput;
 import io.airbyte.config.StandardDestinationDefinition;
 import io.airbyte.config.StandardSourceDefinition;
-import io.airbyte.config.StandardSyncSchedule;
-import io.airbyte.config.StandardSyncSummary;
-import io.airbyte.config.helpers.ScheduleHelpers;
+import io.airbyte.config.StandardSync;
+import io.airbyte.config.StandardSyncOperation;
+import io.airbyte.config.StandardWorkspace;
 import io.airbyte.config.persistence.ConfigNotFoundException;
 import io.airbyte.config.persistence.ConfigRepository;
 import io.airbyte.protocol.models.ConfiguredAirbyteCatalog;
 import io.airbyte.protocol.models.ConfiguredAirbyteStream;
-import io.airbyte.scheduler.models.Attempt;
 import io.airbyte.scheduler.models.Job;
 import io.airbyte.scheduler.persistence.JobPersistence;
+import io.airbyte.scheduler.persistence.WorkspaceHelper;
+import io.airbyte.validation.json.JsonSchemaValidator;
 import io.airbyte.validation.json.JsonValidationException;
 import java.io.IOException;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
-import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
-import org.apache.logging.log4j.util.Strings;
 
 public class JobTracker {
 
@@ -72,104 +52,129 @@ public class JobTracker {
   public static final String MESSAGE_NAME = "Connector Jobs";
   public static final String CONFIG = "config";
   public static final String CATALOG = "catalog";
+  public static final String OPERATION = "operation.";
   public static final String SET = "set";
+
+  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
   private final ConfigRepository configRepository;
   private final JobPersistence jobPersistence;
+  private final WorkspaceHelper workspaceHelper;
   private final TrackingClient trackingClient;
 
-  public JobTracker(ConfigRepository configRepository, JobPersistence jobPersistence) {
-    this(configRepository, jobPersistence, TrackingClientSingleton.get());
+  public JobTracker(final ConfigRepository configRepository, final JobPersistence jobPersistence, final TrackingClient trackingClient) {
+    this(configRepository, jobPersistence, new WorkspaceHelper(configRepository, jobPersistence), trackingClient);
   }
 
   @VisibleForTesting
-  JobTracker(ConfigRepository configRepository, JobPersistence jobPersistence, TrackingClient trackingClient) {
+  JobTracker(final ConfigRepository configRepository,
+             final JobPersistence jobPersistence,
+             final WorkspaceHelper workspaceHelper,
+             final TrackingClient trackingClient) {
     this.configRepository = configRepository;
     this.jobPersistence = jobPersistence;
+    this.workspaceHelper = workspaceHelper;
     this.trackingClient = trackingClient;
   }
 
-  public void trackCheckConnectionSource(UUID jobId, UUID sourceDefinitionId, JobState jobState, StandardCheckConnectionOutput output) {
+  public void trackCheckConnectionSource(final UUID jobId,
+                                         final UUID sourceDefinitionId,
+                                         final UUID workspaceId,
+                                         final JobState jobState,
+                                         final StandardCheckConnectionOutput output) {
     Exceptions.swallow(() -> {
       final ImmutableMap<String, Object> checkConnMetadata = generateCheckConnectionMetadata(output);
       final ImmutableMap<String, Object> jobMetadata = generateJobMetadata(jobId.toString(), ConfigType.CHECK_CONNECTION_SOURCE);
       final ImmutableMap<String, Object> sourceDefMetadata = generateSourceDefinitionMetadata(sourceDefinitionId);
       final ImmutableMap<String, Object> stateMetadata = generateStateMetadata(jobState);
 
-      track(MoreMaps.merge(checkConnMetadata, jobMetadata, sourceDefMetadata, stateMetadata));
+      track(workspaceId, MoreMaps.merge(checkConnMetadata, jobMetadata, sourceDefMetadata, stateMetadata));
     });
   }
 
-  public void trackCheckConnectionDestination(UUID jobId, UUID destinationDefinitionId, JobState jobState, StandardCheckConnectionOutput output) {
+  public void trackCheckConnectionDestination(final UUID jobId,
+                                              final UUID destinationDefinitionId,
+                                              final UUID workspaceId,
+                                              final JobState jobState,
+                                              final StandardCheckConnectionOutput output) {
     Exceptions.swallow(() -> {
       final ImmutableMap<String, Object> checkConnMetadata = generateCheckConnectionMetadata(output);
       final ImmutableMap<String, Object> jobMetadata = generateJobMetadata(jobId.toString(), ConfigType.CHECK_CONNECTION_DESTINATION);
       final ImmutableMap<String, Object> destinationDefinitionMetadata = generateDestinationDefinitionMetadata(destinationDefinitionId);
       final ImmutableMap<String, Object> stateMetadata = generateStateMetadata(jobState);
 
-      track(MoreMaps.merge(checkConnMetadata, jobMetadata, destinationDefinitionMetadata, stateMetadata));
+      track(workspaceId, MoreMaps.merge(checkConnMetadata, jobMetadata, destinationDefinitionMetadata, stateMetadata));
     });
   }
 
-  public void trackDiscover(UUID jobId, UUID sourceDefinitionId, JobState jobState) {
+  public void trackDiscover(final UUID jobId, final UUID sourceDefinitionId, final UUID workspaceId, final JobState jobState) {
     Exceptions.swallow(() -> {
       final ImmutableMap<String, Object> jobMetadata = generateJobMetadata(jobId.toString(), ConfigType.DISCOVER_SCHEMA);
       final ImmutableMap<String, Object> sourceDefMetadata = generateSourceDefinitionMetadata(sourceDefinitionId);
       final ImmutableMap<String, Object> stateMetadata = generateStateMetadata(jobState);
 
-      track(MoreMaps.merge(jobMetadata, sourceDefMetadata, stateMetadata));
+      track(workspaceId, MoreMaps.merge(jobMetadata, sourceDefMetadata, stateMetadata));
     });
   }
 
   // used for tracking all asynchronous jobs (sync and reset).
-  public void trackSync(Job job, JobState jobState) {
+  public void trackSync(final Job job, final JobState jobState) {
     Exceptions.swallow(() -> {
       final ConfigType configType = job.getConfigType();
       final boolean allowedJob = configType == ConfigType.SYNC || configType == ConfigType.RESET_CONNECTION;
       Preconditions.checkArgument(allowedJob, "Job type " + configType + " is not allowed!");
       final long jobId = job.getId();
       final UUID connectionId = UUID.fromString(job.getScope());
-      final UUID sourceDefinitionId = configRepository.getSourceDefinitionFromConnection(connectionId).getSourceDefinitionId();
-      final UUID destinationDefinitionId = configRepository.getDestinationDefinitionFromConnection(connectionId).getDestinationDefinitionId();
+      final StandardSourceDefinition sourceDefinition = configRepository.getSourceDefinitionFromConnection(connectionId);
+      final UUID sourceDefinitionId = sourceDefinition.getSourceDefinitionId();
+      final StandardDestinationDefinition destinationDefinition = configRepository.getDestinationDefinitionFromConnection(connectionId);
+      final UUID destinationDefinitionId = destinationDefinition.getDestinationDefinitionId();
 
-      final ImmutableMap<String, Object> jobMetadata = generateJobMetadata(String.valueOf(jobId), configType, job.getAttemptsCount());
-      final ImmutableMap<String, Object> jobAttemptMetadata = generateJobAttemptMetadata(job.getId(), jobState);
-      final ImmutableMap<String, Object> sourceDefMetadata = generateSourceDefinitionMetadata(sourceDefinitionId);
-      final ImmutableMap<String, Object> destinationDefMetadata = generateDestinationDefinitionMetadata(destinationDefinitionId);
-      final ImmutableMap<String, Object> syncMetadata = generateSyncMetadata(connectionId);
-      final ImmutableMap<String, Object> stateMetadata = generateStateMetadata(jobState);
-      final Map<String, Object> syncConfigMetadata = generateSyncConfigMetadata(job.getConfig());
+      final Map<String, Object> jobMetadata = generateJobMetadata(String.valueOf(jobId), configType, job.getAttemptsCount());
+      final Map<String, Object> jobAttemptMetadata = generateJobAttemptMetadata(job.getId(), jobState);
+      final Map<String, Object> sourceDefMetadata = generateSourceDefinitionMetadata(sourceDefinitionId);
+      final Map<String, Object> destinationDefMetadata = generateDestinationDefinitionMetadata(destinationDefinitionId);
+      final Map<String, Object> syncMetadata = generateSyncMetadata(connectionId);
+      final Map<String, Object> stateMetadata = generateStateMetadata(jobState);
+      final Map<String, Object> syncConfigMetadata = generateSyncConfigMetadata(
+          job.getConfig(),
+          sourceDefinition.getSpec().getConnectionSpecification(),
+          destinationDefinition.getSpec().getConnectionSpecification());
 
-      track(MoreMaps.merge(
-          jobMetadata,
-          jobAttemptMetadata,
-          sourceDefMetadata,
-          destinationDefMetadata,
-          syncMetadata,
-          stateMetadata,
-          syncConfigMetadata));
+      final UUID workspaceId = workspaceHelper.getWorkspaceForJobIdIgnoreExceptions(jobId);
+      track(workspaceId,
+          MoreMaps.merge(
+              jobMetadata,
+              jobAttemptMetadata,
+              sourceDefMetadata,
+              destinationDefMetadata,
+              syncMetadata,
+              stateMetadata,
+              syncConfigMetadata));
     });
   }
 
-  private Map<String, Object> generateSyncConfigMetadata(JobConfig config) {
+  private Map<String, Object> generateSyncConfigMetadata(final JobConfig config,
+                                                         final JsonNode sourceConfigSchema,
+                                                         final JsonNode destinationConfigSchema) {
     if (config.getConfigType() == ConfigType.SYNC) {
-      JsonNode sourceConfiguration = config.getSync().getSourceConfiguration();
-      JsonNode destinationConfiguration = config.getSync().getDestinationConfiguration();
+      final JsonNode sourceConfiguration = config.getSync().getSourceConfiguration();
+      final JsonNode destinationConfiguration = config.getSync().getDestinationConfiguration();
 
-      Map<String, Object> sourceMetadata = configToMetadata(CONFIG + ".source", sourceConfiguration);
-      Map<String, Object> destinationMetadata = configToMetadata(CONFIG + ".destination", destinationConfiguration);
-      Map<String, Object> catalogMetadata = getCatalogMetadata(config.getSync().getConfiguredAirbyteCatalog());
+      final Map<String, Object> sourceMetadata = configToMetadata(CONFIG + ".source", sourceConfiguration, sourceConfigSchema);
+      final Map<String, Object> destinationMetadata = configToMetadata(CONFIG + ".destination", destinationConfiguration, destinationConfigSchema);
+      final Map<String, Object> catalogMetadata = getCatalogMetadata(config.getSync().getConfiguredAirbyteCatalog());
 
       return MoreMaps.merge(sourceMetadata, destinationMetadata, catalogMetadata);
     } else {
-      return Collections.emptyMap();
+      return emptyMap();
     }
   }
 
-  private Map<String, Object> getCatalogMetadata(ConfiguredAirbyteCatalog catalog) {
+  private Map<String, Object> getCatalogMetadata(final ConfiguredAirbyteCatalog catalog) {
     final Map<String, Object> output = new HashMap<>();
 
-    for (ConfiguredAirbyteStream stream : catalog.getStreams()) {
+    for (final ConfiguredAirbyteStream stream : catalog.getStreams()) {
       output.put(CATALOG + ".sync_mode." + stream.getSyncMode().name().toLowerCase(), SET);
       output.put(CATALOG + ".destination_sync_mode." + stream.getDestinationSyncMode().name().toLowerCase(), SET);
     }
@@ -177,50 +182,111 @@ public class JobTracker {
     return output;
   }
 
-  protected static Map<String, Object> configToMetadata(String jsonPath, JsonNode config) {
+  /**
+   * Flattens a config into a map. Uses the schema to determine which fields are const (i.e.
+   * non-sensitive). Non-const, non-boolean values are replaced with {@link #SET} to avoid leaking
+   * potentially-sensitive information.
+   * <p>
+   * anyOf/allOf schemas are treated as non-const values. These aren't (currently) used in config
+   * schemas anyway.
+   *
+   * @param jsonPath A prefix to add to all the keys in the returned map, with a period (`.`)
+   *        separator
+   * @param schema The JSON schema that {@code config} conforms to
+   */
+  protected static Map<String, Object> configToMetadata(final String jsonPath, final JsonNode config, final JsonNode schema) {
+    final Map<String, Object> metadata = configToMetadata(config, schema);
+    // Prepend all the keys with the root jsonPath
+    // But leave the values unchanged
     final Map<String, Object> output = new HashMap<>();
-
-    if (config.isObject()) {
-      final ObjectNode node = (ObjectNode) config;
-      for (Iterator<Map.Entry<String, JsonNode>> it = node.fields(); it.hasNext();) {
-        var entry = it.next();
-        var field = entry.getKey();
-        var fieldJsonPath = jsonPath + "." + field;
-        var child = entry.getValue();
-
-        if (child.isBoolean()) {
-          output.put(fieldJsonPath, child.asBoolean());
-        } else if (!child.isNull()) {
-          if (child.isObject()) {
-            output.putAll(configToMetadata(fieldJsonPath, child));
-          } else if (!child.isTextual() || (child.isTextual() && !child.asText().isEmpty())) {
-            output.put(fieldJsonPath, SET);
-          }
-        }
-      }
-    }
-
+    Jsons.mergeMaps(output, jsonPath, metadata);
     return output;
   }
 
-  private ImmutableMap<String, Object> generateSyncMetadata(UUID connectionId) throws ConfigNotFoundException, IOException, JsonValidationException {
-    final Builder<String, Object> metadata = ImmutableMap.builder();
-    metadata.put("connection_id", connectionId);
+  /**
+   * Does the actually interesting bits of configToMetadata. If config is an object, returns a
+   * flattened map. If config is _not_ an object (i.e. it's a primitive string/number/etc, or it's an
+   * array) then returns a map of {null: toMetadataValue(config)}.
+   */
+  private static Map<String, Object> configToMetadata(final JsonNode config, final JsonNode schema) {
+    if (schema.hasNonNull("const")) {
+      // If this schema is a const, then just dump it into a map:
+      // * If it's an object, flatten it
+      // * Otherwise, do some basic conversions to value-ish data.
+      // It would be a weird thing to declare const: null, but in that case we don't want to report null
+      // anyway, so explicitly use hasNonNull.
+      return Jsons.flatten(config);
+    } else if (schema.has("oneOf")) {
+      // If this schema is a oneOf, then find the first sub-schema which the config matches
+      // and use that sub-schema to convert the config to a map
+      final JsonSchemaValidator validator = new JsonSchemaValidator();
+      for (final Iterator<JsonNode> it = schema.get("oneOf").elements(); it.hasNext();) {
+        final JsonNode subSchema = it.next();
+        if (validator.test(subSchema, config)) {
+          return configToMetadata(config, subSchema);
+        }
+      }
+      // If we didn't match any of the subschemas, then something is wrong. Bail out silently.
+      return emptyMap();
+    } else if (config.isObject()) {
+      // If the schema is not a oneOf, but the config is an object (i.e. the schema has "type": "object")
+      // then we need to recursively convert each field of the object to a map.
+      final Map<String, Object> output = new HashMap<>();
+      final JsonNode maybeProperties = schema.get("properties");
 
-    final StandardSyncSchedule schedule = configRepository.getStandardSyncSchedule(connectionId);
-    String frequencyString;
-    if (schedule.getManual()) {
-      frequencyString = "manual";
+      // If additionalProperties is not set, or it's a boolean, then there's no schema for additional
+      // properties. Use the accept-all schema.
+      // Otherwise, it's an actual schema.
+      final JsonNode maybeAdditionalProperties = schema.get("additionalProperties");
+      final JsonNode additionalPropertiesSchema;
+      if (maybeAdditionalProperties == null || maybeAdditionalProperties.isBoolean()) {
+        additionalPropertiesSchema = OBJECT_MAPPER.createObjectNode();
+      } else {
+        additionalPropertiesSchema = maybeAdditionalProperties;
+      }
+
+      for (final Iterator<Entry<String, JsonNode>> it = config.fields(); it.hasNext();) {
+        final Entry<String, JsonNode> entry = it.next();
+        final String field = entry.getKey();
+        final JsonNode value = entry.getValue();
+
+        final JsonNode propertySchema;
+        if (maybeProperties != null && maybeProperties.hasNonNull(field)) {
+          // If this property is explicitly declared, then use its schema
+          propertySchema = maybeProperties.get(field);
+        } else {
+          // otherwise, use the additionalProperties schema
+          propertySchema = additionalPropertiesSchema;
+        }
+
+        Jsons.mergeMaps(output, field, configToMetadata(value, propertySchema));
+      }
+      return output;
+    } else if (config.isBoolean()) {
+      return singletonMap(null, config.asBoolean());
+    } else if ((!config.isTextual() && !config.isNull()) || (config.isTextual() && !config.asText().isEmpty())) {
+      // This is either non-textual (e.g. integer, array, etc) or non-empty text
+      return singletonMap(null, SET);
     } else {
-      final long intervalInMinutes = TimeUnit.SECONDS.toMinutes(ScheduleHelpers.getIntervalInSecond(schedule.getSchedule()));
-      frequencyString = intervalInMinutes + " min";
+      // Otherwise, this is an empty string, so just ignore it
+      return emptyMap();
     }
-    metadata.put("frequency", frequencyString);
-
-    return metadata.build();
   }
 
-  private static ImmutableMap<String, Object> generateStateMetadata(JobState jobState) {
+  private Map<String, Object> generateSyncMetadata(final UUID connectionId) throws ConfigNotFoundException, IOException, JsonValidationException {
+    final Map<String, Object> operationUsage = new HashMap<>();
+    final StandardSync standardSync = configRepository.getStandardSync(connectionId);
+    for (final UUID operationId : standardSync.getOperationIds()) {
+      final StandardSyncOperation operation = configRepository.getStandardSyncOperation(operationId);
+      if (operation != null) {
+        final Integer usageCount = (Integer) operationUsage.getOrDefault(OPERATION + operation.getOperatorType(), 0);
+        operationUsage.put(OPERATION + operation.getOperatorType(), usageCount + 1);
+      }
+    }
+    return MoreMaps.merge(TrackingMetadata.generateSyncMetadata(standardSync), operationUsage);
+  }
+
+  private static ImmutableMap<String, Object> generateStateMetadata(final JobState jobState) {
     final Builder<String, Object> metadata = ImmutableMap.builder();
 
     switch (jobState) {
@@ -242,48 +308,32 @@ public class JobTracker {
    * job with a failed check. Because of this, tracking just the job attempt status does not capture
    * the whole picture. The `check_connection_outcome` field tracks this.
    */
-  private ImmutableMap<String, Object> generateCheckConnectionMetadata(StandardCheckConnectionOutput output) {
+  private ImmutableMap<String, Object> generateCheckConnectionMetadata(final StandardCheckConnectionOutput output) {
     if (output == null) {
       return ImmutableMap.of();
     }
-    Builder<String, Object> metadata = ImmutableMap.builder();
+    final Builder<String, Object> metadata = ImmutableMap.builder();
     metadata.put("check_connection_outcome", output.getStatus().toString());
     return metadata.build();
   }
 
-  private ImmutableMap<String, Object> generateDestinationDefinitionMetadata(UUID destinationDefinitionId)
+  private ImmutableMap<String, Object> generateDestinationDefinitionMetadata(final UUID destinationDefinitionId)
       throws ConfigNotFoundException, IOException, JsonValidationException {
-    final Builder<String, Object> metadata = ImmutableMap.builder();
-
     final StandardDestinationDefinition destinationDefinition = configRepository.getStandardDestinationDefinition(destinationDefinitionId);
-    metadata.put("connector_destination", destinationDefinition.getName());
-    metadata.put("connector_destination_definition_id", destinationDefinition.getDestinationDefinitionId());
-    final String imageTag = destinationDefinition.getDockerImageTag();
-    if (!Strings.isEmpty(imageTag)) {
-      metadata.put("connector_destination_version", imageTag);
-    }
-    return metadata.build();
+    return TrackingMetadata.generateDestinationDefinitionMetadata(destinationDefinition);
   }
 
-  private ImmutableMap<String, Object> generateSourceDefinitionMetadata(UUID sourceDefinitionId)
+  private ImmutableMap<String, Object> generateSourceDefinitionMetadata(final UUID sourceDefinitionId)
       throws ConfigNotFoundException, IOException, JsonValidationException {
-    final Builder<String, Object> metadata = ImmutableMap.builder();
-
     final StandardSourceDefinition sourceDefinition = configRepository.getStandardSourceDefinition(sourceDefinitionId);
-    metadata.put("connector_source", sourceDefinition.getName());
-    metadata.put("connector_source_definition_id", sourceDefinition.getSourceDefinitionId());
-    final String imageTag = sourceDefinition.getDockerImageTag();
-    if (!Strings.isEmpty(imageTag)) {
-      metadata.put("connector_source_version", imageTag);
-    }
-    return metadata.build();
+    return TrackingMetadata.generateSourceDefinitionMetadata(sourceDefinition);
   }
 
-  private ImmutableMap<String, Object> generateJobMetadata(String jobId, ConfigType configType) {
+  private ImmutableMap<String, Object> generateJobMetadata(final String jobId, final ConfigType configType) {
     return generateJobMetadata(jobId, configType, 0);
   }
 
-  private ImmutableMap<String, Object> generateJobMetadata(String jobId, ConfigType configType, int attempt) {
+  private ImmutableMap<String, Object> generateJobMetadata(final String jobId, final ConfigType configType, final int attempt) {
     final Builder<String, Object> metadata = ImmutableMap.builder();
     metadata.put("job_type", configType);
     metadata.put("job_id", jobId);
@@ -292,29 +342,29 @@ public class JobTracker {
     return metadata.build();
   }
 
-  private ImmutableMap<String, Object> generateJobAttemptMetadata(long jobId, JobState jobState) throws IOException {
-    final Builder<String, Object> metadata = ImmutableMap.builder();
+  private ImmutableMap<String, Object> generateJobAttemptMetadata(final long jobId, final JobState jobState) throws IOException {
     final Job job = jobPersistence.getJob(jobId);
-    if (jobState != JobState.STARTED && job != null) {
-      final List<Attempt> attempts = job.getAttempts();
-      if (attempts != null && !attempts.isEmpty()) {
-        final Attempt lastAttempt = attempts.get(attempts.size() - 1);
-        if (lastAttempt.getOutput() != null && lastAttempt.getOutput().isPresent()) {
-          final JobOutput jobOutput = lastAttempt.getOutput().get();
-          if (jobOutput.getSync() != null) {
-            final StandardSyncSummary syncSummary = jobOutput.getSync().getStandardSyncSummary();
-            metadata.put("duration", Math.round((syncSummary.getEndTime() - syncSummary.getStartTime()) / 1000.0));
-            metadata.put("volume_mb", syncSummary.getBytesSynced());
-            metadata.put("volume_rows", syncSummary.getRecordsSynced());
-          }
-        }
-      }
+    if (jobState != JobState.STARTED) {
+      return TrackingMetadata.generateJobAttemptMetadata(job);
+    } else {
+      return ImmutableMap.of();
     }
-    return metadata.build();
   }
 
-  private void track(Map<String, Object> metadata) {
-    trackingClient.track(MESSAGE_NAME, metadata);
+  private void track(final UUID workspaceId, final Map<String, Object> metadata)
+      throws JsonValidationException, ConfigNotFoundException, IOException {
+    // unfortunate but in the case of jobs that cannot be linked to a workspace there not a sensible way
+    // track it.
+    if (workspaceId != null) {
+      final StandardWorkspace standardWorkspace = configRepository.getStandardWorkspace(workspaceId, true);
+      if (standardWorkspace != null && standardWorkspace.getName() != null) {
+        final Map<String, Object> standardTrackingMetadata = ImmutableMap.of(
+            "workspace_id", workspaceId,
+            "workspace_name", standardWorkspace.getName());
+
+        trackingClient.track(workspaceId, MESSAGE_NAME, MoreMaps.merge(metadata, standardTrackingMetadata));
+      }
+    }
   }
 
 }

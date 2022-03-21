@@ -10,6 +10,12 @@ required:
   - destinationConfiguration
   - catalog
 properties:
+  namespaceDefinition:
+    "$ref": NamespaceDefinitionType.yaml
+  namespaceFormat:
+    type: string
+    default: null
+    example: "${SOURCE_NAMESPACE}"
   prefix:
     description: Prefix that will be prepended to the name of each stream when it is written to the destination.
     type: string
@@ -29,7 +35,20 @@ properties:
   catalog:
     description: the configured airbyte catalog
     type: object
+    # necessary because the configuration declaration is in a separate package.
     existingJavaType: io.airbyte.protocol.models.ConfiguredAirbyteCatalog
   state:
     description: optional state of the previous run. this object is defined per integration.
     "$ref": State.yaml
+  resourceRequirements:
+    description: optional resource requirements to run sync workers - this is used for containers other than the source/dest containers
+    type: object
+    "$ref": ResourceRequirements.yaml
+  sourceResourceRequirements:
+    description: optional resource requirements to use in source container - this is used instead of `resourceRequirements` for the source container
+    type: object
+    "$ref": ResourceRequirements.yaml
+  destinationResourceRequirements:
+    description: optional resource requirements to use in dest container - this is used instead of `resourceRequirements` for the dest container
+    type: object
+    "$ref": ResourceRequirements.yaml

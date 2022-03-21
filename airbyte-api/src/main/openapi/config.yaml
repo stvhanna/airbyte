@@ -4,13 +4,13 @@ info:
     Airbyte Configuration API
     [https://airbyte.io](https://airbyte.io).
 
-    This API is a collection HTTP RPC-style methods. While it is not a REST API, those familiar with REST should find the conventions of this API recognizable.
+    This API is a collection of HTTP RPC-style methods. While it is not a REST API, those familiar with REST should find the conventions of this API recognizable.
 
     Here are some conventions that this API follows:
     * All endpoints are http POST methods.
     * All endpoints accept data via `application/json` request bodies. The API does not accept any data via query params.
-    * The naming convention for endpoints is: localhost:8001/{VERSION}/{METHOD_FAMILY}/{METHOD_NAME} e.g. `localhost:8001/v1/connections/create`.
-    * For all `update` method, the whole object must be passed in, even the fields that did not change.
+    * The naming convention for endpoints is: localhost:8000/{VERSION}/{METHOD_FAMILY}/{METHOD_NAME} e.g. `localhost:8000/v1/connections/create`.
+    * For all `update` methods, the whole object must be passed in, even the fields that did not change.
 
     Change Management:
     * The major version of the API endpoint can be determined / specified in the URL `localhost:8080/v1/connections/create`
@@ -18,8 +18,9 @@ info:
     * All backwards incompatible changes will happen in major version bumps. We will not make backwards incompatible changes in minor version bumps. Examples of non-breaking changes (includes but not limited to...):
       * Adding fields to request or response bodies.
       * Adding new HTTP endpoints.
+    * All `web_backend` APIs are not considered public APIs and are not guaranteeing backwards compatibility.
 
-  version: "1.0.0-oas3"
+  version: "1.0.0"
   title: Airbyte Configuration API
   contact:
     email: contact@airbyte.io
@@ -30,7 +31,7 @@ externalDocs:
   description: Find out more about Airbyte
   url: "https://airbyte.io"
 servers:
-  - url: "http://localhost:8001/api"
+  - url: "http://localhost:8000/api"
 tags:
   - name: workspace
     description: Workspace related resources.
@@ -45,11 +46,17 @@ tags:
   - name: destination_definition_specification
     description: DestinationDefinitionSpecification related resources.
   - name: destination
-    description: Destination  related resources.
+    description: Destination related resources.
   - name: connection
     description: Connection between sources and destinations.
+  - name: oauth
+    description: OAuth related resources to delegate access from user.
+  - name: db_migration
+    description: Database migration related resources.
   - name: web_backend
-    description: Connection between sources and destinations.
+    description: |
+      Endpoints for the Airbyte web application. Those APIs should not be called outside the web application implementation and are not
+      guaranteeing any backwards compatibility.
   - name: health
     description: Healthchecks
   - name: deployment
@@ -76,7 +83,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/WorkspaceRead"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
   /v1/workspaces/delete:
     post:
       tags:
@@ -93,9 +100,22 @@ paths:
         "204":
           description: The resource was deleted successfully.
         "404":
-          description: Source not found
+          $ref: "#/components/responses/NotFoundResponse"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
+  /v1/workspaces/list:
+    post:
+      tags:
+        - workspace
+      summary: List all workspaces registered in the current Airbyte deployment
+      operationId: listWorkspaces
+      responses:
+        "200":
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceReadList"
   /v1/workspaces/get:
     post:
       tags:
@@ -116,9 +136,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/WorkspaceRead"
         "404":
-          description: Workspace not found
+          $ref: "#/components/responses/NotFoundResponse"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
   /v1/workspaces/get_by_slug:
     post:
       tags:
@@ -139,9 +159,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/WorkspaceRead"
         "404":
-          description: Workspace not found
+          $ref: "#/components/responses/NotFoundResponse"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
   /v1/workspaces/update:
     post:
       tags:
@@ -162,9 +182,49 @@ paths:
               schema:
                 $ref: "#/components/schemas/WorkspaceRead"
         "404":
-          description: Workspace not found
+          $ref: "#/components/responses/NotFoundResponse"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
+  /v1/workspaces/update_name:
+    post:
+      tags:
+        - workspace
+      summary: Update workspace name
+      operationId: updateWorkspaceName
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkspaceUpdateName"
+        required: true
+      responses:
+        "200":
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceRead"
+        "404":
+          $ref: "#/components/responses/NotFoundResponse"
+        "422":
+          $ref: "#/components/responses/InvalidInputResponse"
+  /v1/workspaces/tag_feedback_status_as_done:
+    post:
+      tags:
+        - workspace
+      summary: Update workspace feedback state
+      operationId: updateWorkspaceFeedback
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkspaceGiveFeedback"
+        required: true
+      responses:
+        "204":
+          description: The feedback state has been properly updated
+        "404":
+          $ref: "#/components/responses/NotFoundResponse"
   /v1/notifications/try:
     post:
       tags:
@@ -185,9 +245,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/NotificationRead"
         "404":
-          description: Notification Client not found
+          $ref: "#/components/responses/NotFoundResponse"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
   /v1/source_definitions/create:
     post:
       tags:
@@ -207,7 +267,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/SourceDefinitionRead"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
   /v1/source_definitions/update:
     post:
       tags:
@@ -227,9 +287,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/SourceDefinitionRead"
         "404":
-          description: SourceDefinition not found
+          $ref: "#/components/responses/NotFoundResponse"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
   /v1/source_definitions/list:
     post:
       tags:
@@ -277,9 +337,28 @@ paths:
               schema:
                 $ref: "#/components/schemas/SourceDefinitionRead"
         "404":
-          description: SourceDefinition not found
+          $ref: "#/components/responses/NotFoundResponse"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
+  /v1/source_definitions/delete:
+    post:
+      tags:
+        - source_definition
+      summary: Delete a source definition
+      operationId: deleteSourceDefinition
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SourceDefinitionIdRequestBody"
+        required: true
+      responses:
+        "204":
+          description: The resource was deleted successfully.
+        "404":
+          $ref: "#/components/responses/NotFoundResponse"
+        "422":
+          $ref: "#/components/responses/InvalidInputResponse"
   /v1/source_definition_specifications/get:
     post:
       tags:
@@ -300,9 +379,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/SourceDefinitionSpecificationRead"
         "404":
-          description: SourceDefinition not found
+          $ref: "#/components/responses/NotFoundResponse"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
   /v1/sources/create:
     post:
       tags:
@@ -323,7 +402,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/SourceRead"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
   /v1/sources/update:
     post:
       tags:
@@ -344,9 +423,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/SourceRead"
         "404":
-          description: Source not found
+          $ref: "#/components/responses/NotFoundResponse"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
   /v1/sources/list:
     post:
       tags:
@@ -368,9 +447,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/SourceReadList"
         "404":
-          description: Workspace not found
+          $ref: "#/components/responses/NotFoundResponse"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
   /v1/sources/get:
     post:
       tags:
@@ -391,9 +470,53 @@ paths:
               schema:
                 $ref: "#/components/schemas/SourceRead"
         "404":
-          description: Source not found
+          $ref: "#/components/responses/NotFoundResponse"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
+  /v1/sources/search:
+    post:
+      tags:
+        - source
+      summary: Search sources
+      operationId: searchSources
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SourceSearch"
+        required: true
+      responses:
+        "200":
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceReadList"
+        "422":
+          $ref: "#/components/responses/InvalidInputResponse"
+  /v1/sources/clone:
+    post:
+      tags:
+        - source
+      summary: Clone source
+      operationId: cloneSource
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SourceIdRequestBody"
+        required: true
+      responses:
+        "200":
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceRead"
+        "404":
+          $ref: "#/components/responses/NotFoundResponse"
+        "422":
+          $ref: "#/components/responses/InvalidInputResponse"
   /v1/sources/delete:
     post:
       tags:
@@ -410,9 +533,9 @@ paths:
         "204":
           description: The resource was deleted successfully.
         "404":
-          description: Source not found
+          $ref: "#/components/responses/NotFoundResponse"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
   /v1/sources/check_connection:
     post:
       tags:
@@ -433,9 +556,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/CheckConnectionRead"
         "404":
-          description: Source not found
+          $ref: "#/components/responses/NotFoundResponse"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
   /v1/sources/check_connection_for_update:
     post:
       tags:
@@ -456,9 +579,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/CheckConnectionRead"
         "404":
-          description: Source not found
+          $ref: "#/components/responses/NotFoundResponse"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
   /v1/sources/discover_schema:
     post:
       tags:
@@ -469,7 +592,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/SourceIdRequestBody"
+              $ref: "#/components/schemas/SourceDiscoverSchemaRequestBody"
         required: true
       responses:
         "200":
@@ -479,9 +602,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/SourceDiscoverSchemaRead"
         "404":
-          description: Source not found
+          $ref: "#/components/responses/NotFoundResponse"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
   /v1/destination_definitions/create:
     post:
       tags:
@@ -501,7 +624,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/DestinationDefinitionRead"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
   /v1/destination_definitions/update:
     post:
       tags:
@@ -522,9 +645,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/DestinationDefinitionRead"
         "404":
-          description: DestinationDefinition not found
+          $ref: "#/components/responses/NotFoundResponse"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
   /v1/destination_definitions/list:
     post:
       tags:
@@ -572,9 +695,28 @@ paths:
               schema:
                 $ref: "#/components/schemas/DestinationDefinitionRead"
         "404":
-          description: DestinationDefinition not found
+          $ref: "#/components/responses/NotFoundResponse"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
+  /v1/destination_definitions/delete:
+    post:
+      tags:
+        - destination_definition
+      summary: Delete a destination definition
+      operationId: deleteDestinationDefinition
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DestinationDefinitionIdRequestBody"
+        required: true
+      responses:
+        "204":
+          description: The resource was deleted successfully.
+        "404":
+          $ref: "#/components/responses/NotFoundResponse"
+        "422":
+          $ref: "#/components/responses/InvalidInputResponse"
   /v1/destination_definition_specifications/get:
     post:
       tags:
@@ -595,9 +737,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/DestinationDefinitionSpecificationRead"
         "404":
-          description: DestinationDefinition not found
+          $ref: "#/components/responses/NotFoundResponse"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
   # DESTINATIONS
   /v1/destinations/create:
     post:
@@ -619,7 +761,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/DestinationRead"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
   /v1/destinations/update:
     post:
       tags:
@@ -640,7 +782,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/DestinationRead"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
   /v1/destinations/list:
     post:
       tags:
@@ -661,9 +803,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/DestinationReadList"
         "404":
-          description: Workspace not found
+          $ref: "#/components/responses/NotFoundResponse"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
   /v1/destinations/get:
     post:
       tags:
@@ -684,9 +826,30 @@ paths:
               schema:
                 $ref: "#/components/schemas/DestinationRead"
         "404":
-          description: Destination  not found
+          $ref: "#/components/responses/NotFoundResponse"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
+  /v1/destinations/search:
+    post:
+      tags:
+        - destination
+      summary: Search destinations
+      operationId: searchDestinations
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DestinationSearch"
+        required: true
+      responses:
+        "200":
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DestinationReadList"
+        "422":
+          $ref: "#/components/responses/InvalidInputResponse"
   /v1/destinations/check_connection:
     post:
       tags:
@@ -707,9 +870,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/CheckConnectionRead"
         "404":
-          description: Destination  not found
+          $ref: "#/components/responses/NotFoundResponse"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
   /v1/destinations/check_connection_for_update:
     post:
       tags:
@@ -730,9 +893,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/CheckConnectionRead"
         "404":
-          description: Destination  not found
+          $ref: "#/components/responses/NotFoundResponse"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
   /v1/destinations/delete:
     post:
       tags:
@@ -749,9 +912,32 @@ paths:
         "204":
           description: The resource was deleted successfully.
         "404":
-          description: Destination  not found
+          $ref: "#/components/responses/NotFoundResponse"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
+  /v1/destinations/clone:
+    post:
+      tags:
+        - destination
+      summary: Clone destination
+      operationId: cloneDestination
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DestinationIdRequestBody"
+        required: true
+      responses:
+        "200":
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DestinationRead"
+        "404":
+          $ref: "#/components/responses/NotFoundResponse"
+        "422":
+          $ref: "#/components/responses/InvalidInputResponse"
   /v1/connections/create:
     post:
       tags:
@@ -772,7 +958,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ConnectionRead"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
   /v1/connections/update:
     post:
       tags:
@@ -793,7 +979,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ConnectionRead"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
   /v1/connections/list:
     post:
       tags:
@@ -815,9 +1001,33 @@ paths:
               schema:
                 $ref: "#/components/schemas/ConnectionReadList"
         "404":
-          description: Workspace not found
+          $ref: "#/components/responses/NotFoundResponse"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
+  /v1/connections/list_all:
+    post:
+      tags:
+        - connection
+      summary: Returns all connections for a workspace, including deleted connections.
+      description: List connections for workspace, including deleted connections.
+      operationId: listAllConnectionsForWorkspace
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkspaceIdRequestBody"
+        required: true
+      responses:
+        "200":
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConnectionReadList"
+        "404":
+          $ref: "#/components/responses/NotFoundResponse"
+        "422":
+          $ref: "#/components/responses/InvalidInputResponse"
   /v1/connections/get:
     post:
       tags:
@@ -838,9 +1048,53 @@ paths:
               schema:
                 $ref: "#/components/schemas/ConnectionRead"
         "404":
-          description: Connection not found
+          $ref: "#/components/responses/NotFoundResponse"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
+  /v1/state/get:
+    post:
+      tags:
+        - connection
+      summary: Fetch the current state for a connection.
+      operationId: getState
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConnectionIdRequestBody"
+        required: true
+      responses:
+        "200":
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConnectionState"
+        "404":
+          $ref: "#/components/responses/NotFoundResponse"
+        "422":
+          $ref: "#/components/responses/InvalidInputResponse"
+  /v1/connections/search:
+    post:
+      tags:
+        - connection
+      summary: Search connections
+      operationId: searchConnections
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConnectionSearch"
+        required: true
+      responses:
+        "200":
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConnectionReadList"
+        "422":
+          $ref: "#/components/responses/InvalidInputResponse"
   /v1/connections/delete:
     post:
       tags:
@@ -857,9 +1111,9 @@ paths:
         "204":
           description: The resource was deleted successfully.
         "404":
-          description: Connection not found
+          $ref: "#/components/responses/NotFoundResponse"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
   /v1/connections/sync:
     post:
       tags:
@@ -880,9 +1134,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/JobInfoRead"
         "404":
-          description: Connection not found
+          $ref: "#/components/responses/NotFoundResponse"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
   /v1/connections/reset:
     post:
       tags:
@@ -903,9 +1157,30 @@ paths:
               schema:
                 $ref: "#/components/schemas/JobInfoRead"
         "404":
-          description: Connection not found
+          $ref: "#/components/responses/NotFoundResponse"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
+  /v1/operations/check:
+    post:
+      tags:
+        - operation
+      summary: Check if an operation to be created is valid
+      operationId: checkOperation
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OperatorConfiguration"
+        required: true
+      responses:
+        "200":
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckOperationRead"
+        "422":
+          $ref: "#/components/responses/InvalidInputResponse"
   /v1/operations/create:
     post:
       tags:
@@ -926,7 +1201,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/OperationRead"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
   /v1/operations/update:
     post:
       tags:
@@ -947,7 +1222,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/OperationRead"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
   /v1/operations/list:
     post:
       tags:
@@ -969,9 +1244,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/OperationReadList"
         "404":
-          description: Connection not found
+          $ref: "#/components/responses/NotFoundResponse"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
   /v1/operations/get:
     post:
       tags:
@@ -992,9 +1267,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/OperationRead"
         "404":
-          description: Operation not found
+          $ref: "#/components/responses/NotFoundResponse"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
   /v1/operations/delete:
     post:
       tags:
@@ -1011,9 +1286,9 @@ paths:
         "204":
           description: The resource was deleted successfully.
         "404":
-          description: Operation not found
+          $ref: "#/components/responses/NotFoundResponse"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
   /v1/scheduler/sources/check_connection:
     post:
       tags:
@@ -1034,7 +1309,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/CheckConnectionRead"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
   /v1/scheduler/sources/discover_schema:
     post:
       tags:
@@ -1055,7 +1330,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/SourceDiscoverSchemaRead"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
   /v1/scheduler/destinations/check_connection:
     post:
       tags:
@@ -1076,12 +1351,196 @@ paths:
               schema:
                 $ref: "#/components/schemas/CheckConnectionRead"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
+  /v1/db_migrations/list:
+    post:
+      tags:
+        - db_migration
+      summary: List all database migrations
+      operationId: listMigrations
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DbMigrationRequestBody"
+        required: true
+      responses:
+        "200":
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DbMigrationReadList"
+        "404":
+          $ref: "#/components/responses/NotFoundResponse"
+        "422":
+          $ref: "#/components/responses/InvalidInputResponse"
+  /v1/db_migrations/migrate:
+    post:
+      tags:
+        - db_migration
+      summary: Migrate the database to the latest version
+      operationId: executeMigrations
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DbMigrationRequestBody"
+        required: true
+      responses:
+        "200":
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DbMigrationExecutionRead"
+        "404":
+          $ref: "#/components/responses/NotFoundResponse"
+        "422":
+          $ref: "#/components/responses/InvalidInputResponse"
+  /v1/source_oauths/oauth_params/create:
+    post:
+      tags:
+        - oauth
+      summary: >
+        Sets instancewide variables to be used for the oauth flow when creating this source. When set, these variables will be injected
+        into a connector's configuration before any interaction with the connector image itself. This enables running oauth flows with
+        consistent variables e.g: the company's Google Ads developer_token, client_id, and client_secret without the user having to know
+        about these variables.
+      operationId: setInstancewideSourceOauthParams
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetInstancewideSourceOauthParamsRequestBody"
+        required: true
+      responses:
+        "200":
+          description: Successful
+        "400":
+          $ref: "#/components/responses/ExceptionResponse"
+        "404":
+          $ref: "#/components/responses/NotFoundResponse"
+  /v1/source_oauths/get_consent_url:
+    post:
+      tags:
+        - oauth
+      summary: Given a source connector definition ID, return the URL to the consent screen where to redirect the user to.
+      operationId: getSourceOAuthConsent
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SourceOauthConsentRequest"
+        required: true
+      responses:
+        "200":
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthConsentRead"
+        "404":
+          $ref: "#/components/responses/NotFoundResponse"
+        "422":
+          $ref: "#/components/responses/InvalidInputResponse"
+  /v1/source_oauths/complete_oauth:
+    post:
+      tags:
+        - oauth
+      summary: Given a source def ID generate an access/refresh token etc.
+      operationId: completeSourceOAuth
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompleteSourceOauthRequest"
+        required: true
+      responses:
+        "200":
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompleteOAuthResponse"
+        "404":
+          $ref: "#/components/responses/NotFoundResponse"
+        "422":
+          $ref: "#/components/responses/InvalidInputResponse"
+  /v1/destination_oauths/get_consent_url:
+    post:
+      tags:
+        - oauth
+      summary: Given a destination connector definition ID, return the URL to the consent screen where to redirect the user to.
+      operationId: getDestinationOAuthConsent
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DestinationOauthConsentRequest"
+        required: true
+      responses:
+        "200":
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthConsentRead"
+        "404":
+          $ref: "#/components/responses/NotFoundResponse"
+        "422":
+          $ref: "#/components/responses/InvalidInputResponse"
+  /v1/destination_oauths/complete_oauth:
+    post:
+      tags:
+        - oauth
+      summary: Given a destination def ID generate an access/refresh token etc.
+      operationId: completeDestinationOAuth
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompleteDestinationOAuthRequest"
+        required: true
+      responses:
+        "200":
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompleteOAuthResponse"
+        "404":
+          $ref: "#/components/responses/NotFoundResponse"
+        "422":
+          $ref: "#/components/responses/InvalidInputResponse"
+  /v1/destination_oauths/oauth_params/create:
+    post:
+      tags:
+        - oauth
+      summary: >
+        Sets instancewide variables to be used for the oauth flow when creating this destination. When set, these variables will be injected
+        into a connector's configuration before any interaction with the connector image itself. This enables running oauth flows with
+        consistent variables e.g: the company's Google Ads developer_token, client_id, and client_secret without the user having to know
+        about these variables.
+      operationId: setInstancewideDestinationOauthParams
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetInstancewideDestinationOauthParamsRequestBody"
+        required: true
+      responses:
+        "200":
+          description: Successful
+        "400":
+          $ref: "#/components/responses/ExceptionResponse"
+        "404":
+          $ref: "#/components/responses/NotFoundResponse"
   /v1/web_backend/connections/list:
     post:
       tags:
         - web_backend
-      summary: Returns all connections for a workspace.
+      summary: Returns all non-deleted connections for a workspace.
       operationId: webBackendListConnectionsForWorkspace
       requestBody:
         content:
@@ -1095,11 +1554,34 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/WbConnectionReadList"
+                $ref: "#/components/schemas/WebBackendConnectionReadList"
         "404":
-          description: Workspace not found
+          $ref: "#/components/responses/NotFoundResponse"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
+  /v1/web_backend/connections/list_all:
+    post:
+      tags:
+        - web_backend
+      summary: Returns all connections for a workspace.
+      operationId: webBackendListAllConnectionsForWorkspace
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkspaceIdRequestBody"
+        required: true
+      responses:
+        "200":
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebBackendConnectionReadList"
+        "404":
+          $ref: "#/components/responses/NotFoundResponse"
+        "422":
+          $ref: "#/components/responses/InvalidInputResponse"
   /v1/web_backend/connections/get:
     post:
       tags:
@@ -1118,11 +1600,32 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/WbConnectionRead"
+                $ref: "#/components/schemas/WebBackendConnectionRead"
         "404":
-          description: Connection not found
+          $ref: "#/components/responses/NotFoundResponse"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
+  /v1/web_backend/connections/create:
+    post:
+      tags:
+        - web_backend
+      summary: Create a connection
+      operationId: webBackendCreateConnection
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebBackendConnectionCreate"
+        required: true
+      responses:
+        "200":
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebBackendConnectionRead"
+        "422":
+          $ref: "#/components/responses/InvalidInputResponse"
   /v1/web_backend/connections/update:
     post:
       tags:
@@ -1141,20 +1644,20 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ConnectionRead"
+                $ref: "#/components/schemas/WebBackendConnectionRead"
         "422":
-          $ref: "#/components/responses/InvalidInput"
-  /v1/web_backend/sources/recreate:
+          $ref: "#/components/responses/InvalidInputResponse"
+  /v1/web_backend/connections/search:
     post:
       tags:
         - web_backend
-      summary: Recreate a source
-      operationId: webBackendRecreateSource
+      summary: Search connections
+      operationId: webBackendSearchConnections
       requestBody:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/SourceRecreate"
+              $ref: "#/components/schemas/WebBackendConnectionSearch"
         required: true
       responses:
         "200":
@@ -1162,30 +1665,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SourceRead"
+                $ref: "#/components/schemas/WebBackendConnectionReadList"
         "422":
-          $ref: "#/components/responses/InvalidInput"
-  /v1/web_backend/destinations/recreate:
-    post:
-      tags:
-        - web_backend
-      summary: Recreate a destination
-      operationId: webBackendRecreateDestination
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/DestinationRecreate"
-        required: true
-      responses:
-        "200":
-          description: Successful operation
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DestinationRead"
-        "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
   /v1/jobs/list:
     post:
       tags:
@@ -1206,9 +1688,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/JobReadList"
         "404":
-          description: Connection not found
+          $ref: "#/components/responses/NotFoundResponse"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
   /v1/jobs/get:
     post:
       tags:
@@ -1229,9 +1711,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/JobInfoRead"
         "404":
-          description: Job not found
+          $ref: "#/components/responses/NotFoundResponse"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
   /v1/jobs/cancel:
     post:
       tags:
@@ -1252,9 +1734,32 @@ paths:
               schema:
                 $ref: "#/components/schemas/JobInfoRead"
         "404":
-          description: Job not found
+          $ref: "#/components/responses/NotFoundResponse"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
+  /v1/jobs/get_debug_info:
+    post:
+      tags:
+        - jobs
+      summary: Gets all information needed to debug this job
+      operationId: getJobDebugInfo
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JobIdRequestBody"
+        required: true
+      responses:
+        "200":
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobDebugInfoRead"
+        "404":
+          $ref: "#/components/responses/NotFoundResponse"
+        "422":
+          $ref: "#/components/responses/InvalidInputResponse"
   /v1/health:
     get:
       tags:
@@ -1268,6 +1773,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthCheckRead"
+      # This route is unsecured for external monitoring.
+      security: []
   /v1/logs/get:
     post:
       tags:
@@ -1289,9 +1796,9 @@ paths:
                 type: string
                 format: binary
         "404":
-          description: Logs not found
+          $ref: "#/components/responses/NotFoundResponse"
         "422":
-          $ref: "#/components/responses/InvalidInput"
+          $ref: "#/components/responses/InvalidInputResponse"
   /v1/openapi:
     get:
       tags:
@@ -1338,6 +1845,68 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ImportRead"
+  /v1/deployment/export_workspace:
+    post:
+      tags:
+        - deployment
+      summary: Export Airbyte Workspace Configuration
+      operationId: exportWorkspace
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkspaceIdRequestBody"
+        required: true
+      responses:
+        "200":
+          description: Successful operation
+          content:
+            application/x-gzip:
+              schema:
+                $ref: "#/components/schemas/AirbyteArchive"
+  /v1/deployment/upload_archive_resource:
+    post:
+      tags:
+        - deployment
+      summary: Upload a GZIP archive tarball and stage it in the server's cache as a temporary resource
+      operationId: uploadArchiveResource
+      requestBody:
+        content:
+          application/x-gzip:
+            schema:
+              $ref: "#/components/schemas/AirbyteArchive"
+        required: true
+      responses:
+        "200":
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadRead"
+  /v1/deployment/import_into_workspace:
+    post:
+      tags:
+        - deployment
+      summary: >
+        Import Airbyte Configuration into Workspace (this operation might change ids of imported
+        configurations). Note, in order to use this api endpoint, you might need to upload a
+        temporary archive resource with 'deployment/upload_archive_resource' first
+      operationId: importIntoWorkspace
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImportRequestBody"
+        required: true
+      responses:
+        "200":
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportRead"
+        "404":
+          $ref: "#/components/responses/NotFoundResponse"
 components:
   securitySchemes:
     bearerAuth:
@@ -1372,15 +1941,25 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Notification"
+        displaySetupWizard:
+          type: boolean
     Notification:
       type: object
       required:
         - notificationType
+        - sendOnSuccess
+        - sendOnFailure
       properties:
         # Instead of this type field, we would prefer a json schema "oneOf" but unfortunately,
         # the jsonschema2pojo does not seem to support it yet: https://github.com/joelittlejohn/jsonschema2pojo/issues/392
         notificationType:
           $ref: "#/components/schemas/NotificationType"
+        sendOnSuccess:
+          type: boolean
+          default: false
+        sendOnFailure:
+          type: boolean
+          default: true
         slackConfiguration:
           $ref: "#/components/schemas/SlackNotificationConfiguration"
     SlackNotificationConfiguration:
@@ -1415,6 +1994,15 @@ components:
       properties:
         workspaceId:
           $ref: "#/components/schemas/WorkspaceId"
+    WorkspaceReadList:
+      type: object
+      required:
+        - workspaces
+      properties:
+        workspaces:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkspaceRead"
     WorkspaceRead:
       type: object
       required:
@@ -1449,6 +2037,20 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Notification"
+        firstCompletedSync:
+          type: boolean
+        feedbackDone:
+          type: boolean
+    WorkspaceUpdateName:
+      type: object
+      required:
+        - workspaceId
+        - name
+      properties:
+        workspaceId:
+          $ref: "#/components/schemas/WorkspaceId"
+        name:
+          type: string
     WorkspaceUpdate:
       type: object
       required:
@@ -1477,6 +2079,13 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Notification"
+    WorkspaceGiveFeedback:
+      type: object
+      required:
+        - workspaceId
+      properties:
+        workspaceId:
+          $ref: "#/components/schemas/WorkspaceId"
     # SLUG
     SlugRequestBody:
       type: object
@@ -1515,6 +2124,8 @@ components:
           format: uri
         icon:
           type: string
+        resourceRequirements:
+          $ref: "#/components/schemas/ActorDefinitionResourceRequirements"
     SourceDefinitionUpdate:
       type: object
       description: Update the SourceDefinition. Currently, the only allowed attribute to update is the default docker image version.
@@ -1526,6 +2137,8 @@ components:
           $ref: "#/components/schemas/SourceDefinitionId"
         dockerImageTag:
           type: string
+        resourceRequirements:
+          $ref: "#/components/schemas/ActorDefinitionResourceRequirements"
     SourceDefinitionRead:
       type: object
       required:
@@ -1547,6 +2160,14 @@ components:
           format: uri
         icon:
           type: string
+        releaseStage:
+          $ref: "#/components/schemas/ReleaseStage"
+        releaseDate:
+          description: The date when this connector was first released, in yyyy-mm-dd format.
+          type: string
+          format: date
+        resourceRequirements:
+          $ref: "#/components/schemas/ActorDefinitionResourceRequirements"
     SourceDefinitionReadList:
       type: object
       required:
@@ -1561,6 +2182,64 @@ components:
       description: The specification for what values are required to configure the sourceDefinition.
       type: object
       example: { user: { type: string } }
+    SourceAuthSpecification:
+      $ref: "#/components/schemas/AuthSpecification"
+    AuthSpecification:
+      type: object
+      properties:
+        auth_type:
+          type: string
+          enum: ["oauth2.0"] # Future auth types should be added here
+        oauth2Specification:
+          "$ref": "#/components/schemas/OAuth2Specification"
+    OAuth2Specification:
+      description: An object containing any metadata needed to describe this connector's Oauth flow
+      type: object
+      required:
+        - rootObject
+        - oauthFlowInitParameters
+        - oauthFlowOutputParameters
+      properties:
+        rootObject:
+          description:
+            "A list of strings representing a pointer to the root object which contains any oauth parameters in the ConnectorSpecification.
+
+            Examples:
+
+            if oauth parameters were contained inside the top level, rootObject=[]
+            If they were nested inside another object {'credentials': {'app_id' etc...}, rootObject=['credentials']
+            If they were inside a oneOf {'switch': {oneOf: [{client_id...}, {non_oauth_param]}},  rootObject=['switch', 0]
+            "
+          type: array
+          items: {} # <--- using generic any type. Build fails with oneOf (https://github.com/OpenAPITools/openapi-generator/issues/6161)
+          example:
+            - path
+            - 1
+        oauthFlowInitParameters:
+          description:
+            "Pointers to the fields in the rootObject needed to obtain the initial refresh/access tokens for the OAuth flow.
+            Each inner array represents the path in the rootObject of the referenced field.
+            For example.
+            Assume the rootObject contains params 'app_secret', 'app_id' which are needed to get the initial refresh token.
+            If they are not nested in the rootObject, then the array would look like this [['app_secret'], ['app_id']]
+            If they are nested inside an object called 'auth_params' then this array would be [['auth_params', 'app_secret'], ['auth_params', 'app_id']]"
+          type: array
+          items:
+            description: A list of strings denoting a pointer into the rootObject for where to find this property
+            type: array
+            items:
+              type: string
+        oauthFlowOutputParameters:
+          description:
+            "Pointers to the fields in the rootObject which can be populated from successfully completing the oauth flow using the init parameters.
+            This is typically a refresh/access token.
+            Each inner array represents the path in the rootObject of the referenced field."
+          type: array
+          items:
+            description: A list of strings denoting a pointer into the rootObject for where to find this property
+            type: array
+            items:
+              type: string
     SourceDefinitionSpecificationRead:
       type: object
       required:
@@ -1573,6 +2252,10 @@ components:
           type: string
         connectionSpecification:
           $ref: "#/components/schemas/SourceDefinitionSpecification"
+        authSpecification:
+          $ref: "#/components/schemas/SourceAuthSpecification"
+        advancedAuth:
+          $ref: "#/components/schemas/AdvancedAuth"
         jobInfo:
           $ref: "#/components/schemas/SynchronousJobRead"
     # SOURCE
@@ -1600,36 +2283,30 @@ components:
         connectionConfiguration:
           $ref: "#/components/schemas/SourceConfiguration"
     SourceCreate:
-      allOf:
-        - $ref: "#/components/schemas/SourceCoreConfig"
-        - type: object
-          required:
-            - workspaceId
-            - name
-          properties:
-            workspaceId:
-              $ref: "#/components/schemas/WorkspaceId"
-            name:
-              type: string
-    SourceRecreate:
       type: object
       required:
         - workspaceId
-        - sourceDefinitionId
-        - sourceId
-        - connectionConfiguration
         - name
+        - sourceDefinitionId
+        - connectionConfiguration
       properties:
         sourceDefinitionId:
           $ref: "#/components/schemas/SourceDefinitionId"
-        sourceId:
-          $ref: "#/components/schemas/SourceId"
-        workspaceId:
-          $ref: "#/components/schemas/WorkspaceId"
         connectionConfiguration:
           $ref: "#/components/schemas/SourceConfiguration"
+        workspaceId:
+          $ref: "#/components/schemas/WorkspaceId"
         name:
           type: string
+    SourceDiscoverSchemaRequestBody:
+      type: object
+      required:
+        - sourceId
+      properties:
+        sourceId:
+          $ref: "#/components/schemas/SourceId"
+        disable_cache:
+          type: boolean
     SourceUpdate:
       type: object
       required:
@@ -1684,10 +2361,27 @@ components:
           $ref: "#/components/schemas/AirbyteCatalog"
         jobInfo:
           $ref: "#/components/schemas/SynchronousJobRead"
+    SourceSearch:
+      type: object
+      properties:
+        sourceDefinitionId:
+          $ref: "#/components/schemas/SourceDefinitionId"
+        sourceId:
+          $ref: "#/components/schemas/SourceId"
+        workspaceId:
+          $ref: "#/components/schemas/WorkspaceId"
+        connectionConfiguration:
+          $ref: "#/components/schemas/SourceConfiguration"
+        name:
+          type: string
+        sourceName:
+          type: string
     # DESTINATION DEFINITION
     DestinationDefinitionId:
       type: string
       format: uuid
+    DestinationAuthSpecification:
+      $ref: "#/components/schemas/AuthSpecification"
     DestinationDefinitionIdRequestBody:
       type: object
       required:
@@ -1714,6 +2408,8 @@ components:
           format: uri
         icon:
           type: string
+        resourceRequirements:
+          $ref: "#/components/schemas/ActorDefinitionResourceRequirements"
     DestinationDefinitionUpdate:
       type: object
       required:
@@ -1724,6 +2420,8 @@ components:
           $ref: "#/components/schemas/DestinationDefinitionId"
         dockerImageTag:
           type: string
+        resourceRequirements:
+          $ref: "#/components/schemas/ActorDefinitionResourceRequirements"
     DestinationDefinitionRead:
       type: object
       required:
@@ -1746,6 +2444,14 @@ components:
           format: uri
         icon:
           type: string
+        releaseStage:
+          $ref: "#/components/schemas/ReleaseStage"
+        releaseDate:
+          description: The date when this connector was first released, in yyyy-mm-dd format.
+          type: string
+          format: date
+        resourceRequirements:
+          $ref: "#/components/schemas/ActorDefinitionResourceRequirements"
     DestinationDefinitionReadList:
       type: object
       required:
@@ -1771,12 +2477,20 @@ components:
           type: string
         connectionSpecification:
           $ref: "#/components/schemas/DestinationDefinitionSpecification"
+        authSpecification:
+          $ref: "#/components/schemas/DestinationAuthSpecification"
+        advancedAuth:
+          $ref: "#/components/schemas/AdvancedAuth"
         jobInfo:
           $ref: "#/components/schemas/SynchronousJobRead"
         supportedDestinationSyncModes:
           type: array
           items:
             $ref: "#/components/schemas/DestinationSyncMode"
+        supportsDbt:
+          type: boolean
+        supportsNormalization:
+          type: boolean
     # DESTINATION
     DestinationId:
       type: string
@@ -1803,36 +2517,21 @@ components:
         connectionConfiguration:
           $ref: "#/components/schemas/DestinationConfiguration"
     DestinationCreate:
-      allOf:
-        - $ref: "#/components/schemas/DestinationCoreConfig"
-        - type: object
-          required:
-            - workspaceId
-            - name
-          properties:
-            workspaceId:
-              $ref: "#/components/schemas/WorkspaceId"
-            name:
-              type: string
-    DestinationRecreate:
       type: object
       required:
+        - name
         - workspaceId
-        - destinationId
         - destinationDefinitionId
         - connectionConfiguration
-        - name
       properties:
-        destinationDefinitionId:
-          $ref: "#/components/schemas/DestinationDefinitionId"
-        destinationId:
-          $ref: "#/components/schemas/DestinationId"
         workspaceId:
           $ref: "#/components/schemas/WorkspaceId"
-        connectionConfiguration:
-          $ref: "#/components/schemas/DestinationConfiguration"
         name:
           type: string
+        destinationDefinitionId:
+          $ref: "#/components/schemas/DestinationDefinitionId"
+        connectionConfiguration:
+          $ref: "#/components/schemas/DestinationConfiguration"
     DestinationUpdate:
       type: object
       required:
@@ -1877,6 +2576,29 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/DestinationRead"
+    DestinationSearch:
+      type: object
+      properties:
+        destinationDefinitionId:
+          $ref: "#/components/schemas/DestinationDefinitionId"
+        destinationId:
+          $ref: "#/components/schemas/DestinationId"
+        workspaceId:
+          $ref: "#/components/schemas/WorkspaceId"
+        connectionConfiguration:
+          $ref: "#/components/schemas/DestinationConfiguration"
+        name:
+          type: string
+        destinationName:
+          type: string
+    # SOURCE / DESTINATION RELEASE STAGE ENUM
+    ReleaseStage:
+      type: string
+      enum:
+        - alpha
+        - beta
+        - generally_available
+        - custom
     # CONNECTION
     ConnectionId:
       type: string
@@ -1888,6 +2610,13 @@ components:
       properties:
         connectionId:
           $ref: "#/components/schemas/ConnectionId"
+    DbMigrationRequestBody:
+      type: object
+      required:
+        - database
+      properties:
+        database:
+          type: string
     WebBackendConnectionRequestBody:
       type: object
       required:
@@ -1907,6 +2636,13 @@ components:
         name:
           type: string
           description: Optional name of the connection
+        namespaceDefinition:
+          $ref: "#/components/schemas/NamespaceDefinitionType"
+        namespaceFormat:
+          type: string
+          description: Used when namespaceDefinition is 'customformat'. If blank then behaves like namespaceDefinition = 'destination'. If "${SOURCE_NAMESPACE}" then behaves like namespaceDefinition = 'source'.
+          default: null
+          example: "${SOURCE_NAMESPACE}"
         prefix:
           type: string
           description: Prefix that will be prepended to the name of each stream when it is written to the destination.
@@ -1924,6 +2660,49 @@ components:
           $ref: "#/components/schemas/ConnectionSchedule"
         status:
           $ref: "#/components/schemas/ConnectionStatus"
+        resourceRequirements:
+          $ref: "#/components/schemas/ResourceRequirements"
+    WebBackendConnectionCreate:
+      type: object
+      required:
+        - connection
+        - sourceId
+        - destinationId
+        - status
+      properties:
+        name:
+          type: string
+          description: Optional name of the connection
+        namespaceDefinition:
+          $ref: "#/components/schemas/NamespaceDefinitionType"
+        namespaceFormat:
+          type: string
+          description: Used when namespaceDefinition is 'customformat'. If blank then behaves like namespaceDefinition = 'destination'. If "${SOURCE_NAMESPACE}" then behaves like namespaceDefinition = 'source'.
+          default: null
+          example: "${SOURCE_NAMESPACE}"
+        prefix:
+          type: string
+          description: Prefix that will be prepended to the name of each stream when it is written to the destination.
+        sourceId:
+          $ref: "#/components/schemas/SourceId"
+        destinationId:
+          $ref: "#/components/schemas/DestinationId"
+        operationIds:
+          type: array
+          items:
+            $ref: "#/components/schemas/OperationId"
+        syncCatalog:
+          $ref: "#/components/schemas/AirbyteCatalog"
+        schedule:
+          $ref: "#/components/schemas/ConnectionSchedule"
+        status:
+          $ref: "#/components/schemas/ConnectionStatus"
+        resourceRequirements:
+          $ref: "#/components/schemas/ResourceRequirements"
+        operations:
+          type: array
+          items:
+            $ref: "#/components/schemas/OperationCreate"
     ConnectionUpdate:
       type: object
       required:
@@ -1933,6 +2712,16 @@ components:
       properties:
         connectionId:
           $ref: "#/components/schemas/ConnectionId"
+        namespaceDefinition:
+          $ref: "#/components/schemas/NamespaceDefinitionType"
+        namespaceFormat:
+          type: string
+          description: Used when namespaceDefinition is 'customformat'. If blank then behaves like namespaceDefinition = 'destination'. If "${SOURCE_NAMESPACE}" then behaves like namespaceDefinition = 'source'.
+          default: null
+          example: "${SOURCE_NAMESPACE}"
+        name:
+          type: string
+          description: Name that will be set to this connection
         prefix:
           type: string
           description: Prefix that will be prepended to the name of each stream when it is written to the destination.
@@ -1946,13 +2735,48 @@ components:
           $ref: "#/components/schemas/ConnectionSchedule"
         status:
           $ref: "#/components/schemas/ConnectionStatus"
+        resourceRequirements:
+          $ref: "#/components/schemas/ResourceRequirements"
     WebBackendConnectionUpdate:
-      allOf:
-        - $ref: "#/components/schemas/ConnectionUpdate"
-        - type: object
-          properties:
-            withRefreshedCatalog:
-              type: boolean
+      type: object
+      required:
+        - connectionId
+        - syncCatalog
+        - status
+      properties:
+        name:
+          type: string
+          description: Name that will be set to the connection
+        connectionId:
+          $ref: "#/components/schemas/ConnectionId"
+        namespaceDefinition:
+          $ref: "#/components/schemas/NamespaceDefinitionType"
+        namespaceFormat:
+          type: string
+          description: Used when namespaceDefinition is 'customformat'. If blank then behaves like namespaceDefinition = 'destination'. If "${SOURCE_NAMESPACE}" then behaves like namespaceDefinition = 'source'.
+          default: null
+          example: "${SOURCE_NAMESPACE}"
+        prefix:
+          type: string
+          description: Prefix that will be prepended to the name of each stream when it is written to the destination.
+        operationIds:
+          type: array
+          items:
+            $ref: "#/components/schemas/OperationId"
+        syncCatalog:
+          $ref: "#/components/schemas/AirbyteCatalog"
+        schedule:
+          $ref: "#/components/schemas/ConnectionSchedule"
+        status:
+          $ref: "#/components/schemas/ConnectionStatus"
+        resourceRequirements:
+          $ref: "#/components/schemas/ResourceRequirements"
+        withRefreshedCatalog:
+          type: boolean
+        operations:
+          type: array
+          items:
+            $ref: "#/components/schemas/WebBackendOperationCreateOrUpdate"
     ConnectionRead:
       type: object
       required:
@@ -1967,6 +2791,13 @@ components:
           $ref: "#/components/schemas/ConnectionId"
         name:
           type: string
+        namespaceDefinition:
+          $ref: "#/components/schemas/NamespaceDefinitionType"
+        namespaceFormat:
+          type: string
+          description: Used when namespaceDefinition is 'customformat'. If blank then behaves like namespaceDefinition = 'destination'. If "${SOURCE_NAMESPACE}" then behaves like namespaceDefinition = 'source'.
+          default: null
+          example: "${SOURCE_NAMESPACE}"
         prefix:
           type: string
           description: Prefix that will be prepended to the name of each stream when it is written to the destination.
@@ -1984,6 +2815,66 @@ components:
           $ref: "#/components/schemas/ConnectionSchedule"
         status:
           $ref: "#/components/schemas/ConnectionStatus"
+        resourceRequirements:
+          $ref: "#/components/schemas/ResourceRequirements"
+    ConnectionSearch:
+      type: object
+      properties:
+        connectionId:
+          $ref: "#/components/schemas/ConnectionId"
+        name:
+          type: string
+        namespaceDefinition:
+          $ref: "#/components/schemas/NamespaceDefinitionType"
+        namespaceFormat:
+          type: string
+          description: Used when namespaceDefinition is 'customformat'. If blank then behaves like namespaceDefinition = 'destination'. If "${SOURCE_NAMESPACE}" then behaves like namespaceDefinition = 'source'.
+          default: null
+          example: "${SOURCE_NAMESPACE}"
+        prefix:
+          type: string
+          description: Prefix that will be prepended to the name of each stream when it is written to the destination.
+        sourceId:
+          $ref: "#/components/schemas/SourceId"
+        destinationId:
+          $ref: "#/components/schemas/DestinationId"
+        schedule:
+          $ref: "#/components/schemas/ConnectionSchedule"
+        status:
+          $ref: "#/components/schemas/ConnectionStatus"
+        source:
+          $ref: "#/components/schemas/SourceSearch"
+        destination:
+          $ref: "#/components/schemas/DestinationSearch"
+    WebBackendConnectionSearch:
+      type: object
+      properties:
+        connectionId:
+          $ref: "#/components/schemas/ConnectionId"
+        name:
+          type: string
+        namespaceDefinition:
+          $ref: "#/components/schemas/NamespaceDefinitionType"
+        namespaceFormat:
+          type: string
+          description: Used when namespaceDefinition is 'customformat'. If blank then behaves like namespaceDefinition = 'destination'. If "${SOURCE_NAMESPACE}" then behaves like namespaceDefinition = 'source'.
+          default: null
+          example: "${SOURCE_NAMESPACE}"
+        prefix:
+          type: string
+          description: Prefix that will be prepended to the name of each stream when it is written to the destination.
+        sourceId:
+          $ref: "#/components/schemas/SourceId"
+        destinationId:
+          $ref: "#/components/schemas/DestinationId"
+        schedule:
+          $ref: "#/components/schemas/ConnectionSchedule"
+        status:
+          $ref: "#/components/schemas/ConnectionStatus"
+        source:
+          $ref: "#/components/schemas/SourceSearch"
+        destination:
+          $ref: "#/components/schemas/DestinationSearch"
     ConnectionReadList:
       type: object
       required:
@@ -2003,6 +2894,7 @@ components:
     ConnectionSchedule:
       description: if null, then no schedule is set.
       type: object
+      nullable: true
       required:
         - units
         - timeUnit
@@ -2018,6 +2910,14 @@ components:
             - days
             - weeks
             - months
+    NamespaceDefinitionType:
+      type: string
+      description: Method used for computing final namespace in destination
+      default: source
+      enum:
+        - source
+        - destination
+        - customformat
     # Operations
     OperationId:
       type: string
@@ -2025,16 +2925,19 @@ components:
     OperationIdRequestBody:
       type: object
       required:
-        - OperationId
+        - operationId
       properties:
-        OperationId:
+        operationId:
           $ref: "#/components/schemas/OperationId"
     OperationCreate:
       type: object
       required:
         - name
         - operatorConfiguration
+        - workspaceId
       properties:
+        workspaceId:
+          $ref: "#/components/schemas/WorkspaceId"
         name:
           type: string
         operatorConfiguration:
@@ -2052,13 +2955,31 @@ components:
           type: string
         operatorConfiguration:
           $ref: "#/components/schemas/OperatorConfiguration"
+    WebBackendOperationCreateOrUpdate:
+      type: object
+      required:
+        - name
+        - operatorConfiguration
+        - workspaceId
+      properties:
+        operationId:
+          $ref: "#/components/schemas/OperationId"
+        workspaceId:
+          $ref: "#/components/schemas/WorkspaceId"
+        name:
+          type: string
+        operatorConfiguration:
+          $ref: "#/components/schemas/OperatorConfiguration"
     OperationRead:
       type: object
       required:
         - operationId
         - name
         - operatorConfiguration
+        - workspaceId
       properties:
+        workspaceId:
+          $ref: "#/components/schemas/WorkspaceId"
         operationId:
           $ref: "#/components/schemas/OperationId"
         name:
@@ -2115,6 +3036,18 @@ components:
         dockerImage:
           type: string
         dbtArguments:
+          type: string
+    CheckOperationRead:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum:
+            - succeeded
+            - failed
+        message:
           type: string
     # LOGS
     LogType:
@@ -2252,6 +3185,9 @@ components:
             $ref: "#/components/schemas/JobConfigType"
         configId:
           type: string
+        pagination:
+          type: object
+          $ref: "#/components/schemas/Pagination"
     JobIdRequestBody:
       type: object
       required:
@@ -2283,6 +3219,31 @@ components:
           format: int64
         status:
           $ref: "#/components/schemas/JobStatus"
+    JobDebugRead:
+      type: object
+      required:
+        - id
+        - configType
+        - configId
+        - status
+        - airbyteVersion
+        - sourceDefinition
+        - destinationDefinition
+      properties:
+        id:
+          $ref: "#/components/schemas/JobId"
+        configType:
+          $ref: "#/components/schemas/JobConfigType"
+        configId:
+          type: string
+        status:
+          $ref: "#/components/schemas/JobStatus"
+        airbyteVersion:
+          type: string
+        sourceDefinition:
+          $ref: "#/components/schemas/SourceDefinitionRead"
+        destinationDefinition:
+          $ref: "#/components/schemas/DestinationDefinitionRead"
     JobWithAttemptsRead:
       type: object
       properties:
@@ -2329,6 +3290,87 @@ components:
         recordsSynced:
           type: integer
           format: int64
+        totalStats:
+          $ref: "#/components/schemas/AttemptStats"
+        streamStats:
+          type: array
+          items:
+            $ref: "#/components/schemas/AttemptStreamStats"
+        failureSummary:
+          $ref: "#/components/schemas/AttemptFailureSummary"
+    AttemptStats:
+      type: object
+      properties:
+        recordsEmitted:
+          type: integer
+          format: int64
+        bytesEmitted:
+          type: integer
+          format: int64
+        stateMessagesEmitted:
+          type: integer
+          format: int64
+        recordsCommitted:
+          type: integer
+          format: int64
+    AttemptStreamStats:
+      type: object
+      required:
+        - streamName
+        - stats
+      properties:
+        streamName:
+          type: string
+        stats:
+          $ref: "#/components/schemas/AttemptStats"
+    AttemptFailureSummary:
+      type: object
+      required:
+        - failures
+      properties:
+        failures:
+          type: array
+          items:
+            $ref: "#/components/schemas/AttemptFailureReason"
+        partialSuccess:
+          description: True if the number of committed records for this attempt was greater than 0. False if 0 records were committed. If not set, the number of committed records is unknown.
+          type: boolean
+    AttemptFailureReason:
+      type: object
+      required:
+        - timestamp
+      properties:
+        failureOrigin:
+          $ref: "#/components/schemas/AttemptFailureOrigin"
+        failureType:
+          $ref: "#/components/schemas/AttemptFailureType"
+        externalMessage:
+          type: string
+        stacktrace:
+          type: string
+        retryable:
+          description: True if it is known that retrying may succeed, e.g. for a transient failure. False if it is known that a retry will not succeed, e.g. for a configuration issue. If not set, retryable status is not well known.
+          type: boolean
+        timestamp:
+          type: integer
+          format: int64
+    AttemptFailureOrigin:
+      description: Indicates where the error originated. If not set, the origin of error is not well known.
+      type: string
+      enum:
+        - source
+        - destination
+        - replication
+        - persistence
+        - normalization
+        - dbt
+    AttemptFailureType:
+      description: Categorizes well known errors into types for programmatic handling. If not set, the type of error is not well known.
+      type: string
+      enum:
+        - config_error
+        - system_error
+        - manual_cancellation
     AttemptStatus:
       type: string
       enum:
@@ -2352,6 +3394,18 @@ components:
       properties:
         job:
           $ref: "#/components/schemas/JobRead"
+        attempts:
+          type: array
+          items:
+            $ref: "#/components/schemas/AttemptInfoRead"
+    JobDebugInfoRead:
+      type: object
+      required:
+        - job
+        - attempts
+      properties:
+        job:
+          $ref: "#/components/schemas/JobDebugRead"
         attempts:
           type: array
           items:
@@ -2402,13 +3456,20 @@ components:
           type: boolean
         logs:
           $ref: "#/components/schemas/LogRead"
+    Pagination:
+      type: object
+      properties:
+        pageSize:
+          type: integer
+        rowOffset:
+          type: integer
     # Health
     HealthCheckRead:
       type: object
       required:
-        - db
+        - available
       properties:
-        db:
+        available:
           type: boolean
     # General
     CheckConnectionRead:
@@ -2426,8 +3487,339 @@ components:
           type: string
         jobInfo:
           $ref: "#/components/schemas/SynchronousJobRead"
+    ConnectionState:
+      type: object
+      required:
+        - connectionId
+      properties:
+        connectionId:
+          $ref: "#/components/schemas/ConnectionId"
+        state:
+          $ref: "#/components/schemas/ConnectionStateObject"
+    ConnectionStateObject:
+      type: object
+    ActorDefinitionResourceRequirements:
+      description: actor definition specific resource requirements. if default is set, these are the requirements that should be set for ALL jobs run for this actor definition. it is overriden by the job type specific configurations. if not set, the platform will use defaults. these values will be overriden by configuration at the connection level.
+      type: object
+      additionalProperties: false
+      properties:
+        default:
+          "$ref": "#/definitions/ResourceRequirements"
+        jobSpecific:
+          type: array
+          items:
+            "$ref": "#/definitions/JobTypeResourceLimit"
+    JobTypeResourceLimit:
+      description: sets resource requirements for a specific job type for an actor definition. these values override the default, if both are set.
+      type: object
+      additionalProperties: false
+      required:
+        - jobType
+        - resourceRequirements
+      properties:
+        jobType:
+          "$ref": "#/definitions/JobType"
+        resourceRequirements:
+          "$ref": "#/definitions/ResourceRequirements"
+    JobType:
+      description: enum that describes the different types of jobs that the platform runs.
+      type: string
+      enum:
+        - get_spec
+        - check_connection
+        - discover_schema
+        - sync
+        - reset_connection
+        - connection_updater
+        - replicate
+    ResourceRequirements:
+      description: optional resource requirements to run workers (blank for unbounded allocations)
+      type: object
+      properties:
+        cpu_request:
+          type: string
+        cpu_limit:
+          type: string
+        memory_request:
+          type: string
+        memory_limit:
+          type: string
+    # DB Migration
+    DbMigrationState:
+      type: string
+      # https://github.com/flyway/flyway/blob/master/flyway-core/src/main/java/org/flywaydb/core/api/MigrationState.java
+      enum:
+        - pending
+        - above_target
+        - below_baseline
+        - baseline
+        - ignored
+        - missing_success
+        - missing_failed
+        - success
+        - undone
+        - available
+        - failed
+        - out_of_order
+        - future_success
+        - future_failed
+        - outdated
+        - superseded
+        - deleted
+    DbMigrationRead:
+      type: object
+      required:
+        - migrationType
+        - migrationVersion
+        - migrationDescription
+      properties:
+        migrationType:
+          type: string
+        migrationVersion:
+          type: string
+        migrationDescription:
+          type: string
+        migrationState:
+          $ref: "#/components/schemas/DbMigrationState"
+        migratedBy:
+          type: string
+        migratedAt:
+          type: integer
+          format: int64
+        migrationScript:
+          type: string
+    DbMigrationReadList:
+      type: object
+      properties:
+        migrations:
+          type: array
+          items:
+            $ref: "#/components/schemas/DbMigrationRead"
+    DbMigrationExecutionRead:
+      type: object
+      properties:
+        initialVersion:
+          type: string
+        targetVersion:
+          type: string
+        executedMigrations:
+          type: array
+          items:
+            $ref: "#/components/schemas/DbMigrationRead"
+    # OAuth
+    OAuthConfiguration:
+      description: OAuth specific blob.
+    OAuthInputConfiguration:
+      description: The values required to configure OAuth flows.
+        The schema for this must match the `OAuthConfigSpecification.oauthUserInputFromConnectorConfigSpecification` schema.
+      $ref: "#/components/schemas/OAuthConfiguration"
+    AdvancedAuth:
+      type: object
+      properties:
+        authFlowType:
+          type: string
+          enum: ["oauth2.0", "oauth1.0"]
+        predicateKey:
+          description: Json Path to a field in the connectorSpecification that should exist for the advanced auth to be applicable.
+          type: array
+          items:
+            type: string
+        predicateValue:
+          description: Value of the predicate_key fields for the advanced auth to be applicable.
+          type: string
+        oauthConfigSpecification:
+          "$ref": "#/components/schemas/OAuthConfigSpecification"
+    OAuthConfigSpecification:
+      type: object
+      properties:
+        oauthUserInputFromConnectorConfigSpecification:
+          description: |-
+            OAuth specific blob. This is a Json Schema used to validate Json configurations used as input to OAuth.
+            Must be a valid non-nested JSON that refers to properties from ConnectorSpecification.connectionSpecification
+            using special annotation 'path_in_connector_config'.
+            These are input values the user is entering through the UI to authenticate to the connector, that might also shared
+            as inputs for syncing data via the connector.
+
+            Examples:
+
+            if no connector values is shared during oauth flow, oauth_user_input_from_connector_config_specification=[]
+            if connector values such as 'app_id' inside the top level are used to generate the API url for the oauth flow,
+              oauth_user_input_from_connector_config_specification={
+                app_id: {
+                  type: string
+                  path_in_connector_config: ['app_id']
+                }
+              }
+            if connector values such as 'info.app_id' nested inside another object are used to generate the API url for the oauth flow,
+              oauth_user_input_from_connector_config_specification={
+                app_id: {
+                  type: string
+                  path_in_connector_config: ['info', 'app_id']
+                }
+              }
+          $ref: "#/components/schemas/OAuthConfiguration"
+        completeOAuthOutputSpecification:
+          description: |-
+            OAuth specific blob. This is a Json Schema used to validate Json configurations produced by the OAuth flows as they are
+            returned by the distant OAuth APIs.
+            Must be a valid JSON describing the fields to merge back to `ConnectorSpecification.connectionSpecification`.
+            For each field, a special annotation `path_in_connector_config` can be specified to determine where to merge it,
+
+            Examples:
+
+                complete_oauth_output_specification={
+                  refresh_token: {
+                    type: string,
+                    path_in_connector_config: ['credentials', 'refresh_token']
+                  }
+                }
+          $ref: "#/components/schemas/OAuthConfiguration"
+        completeOAuthServerInputSpecification:
+          description: |-
+            OAuth specific blob. This is a Json Schema used to validate Json configurations persisted as Airbyte Server configurations.
+            Must be a valid non-nested JSON describing additional fields configured by the Airbyte Instance or Workspace Admins to be used by the
+            server when completing an OAuth flow (typically exchanging an auth code for refresh token).
+
+            Examples:
+
+                complete_oauth_server_input_specification={
+                  client_id: {
+                    type: string
+                  },
+                  client_secret: {
+                    type: string
+                  }
+                }
+          $ref: "#/components/schemas/OAuthConfiguration"
+        completeOAuthServerOutputSpecification:
+          description: |-
+            OAuth specific blob. This is a Json Schema used to validate Json configurations persisted as Airbyte Server configurations that
+            also need to be merged back into the connector configuration at runtime.
+            This is a subset configuration of `complete_oauth_server_input_specification` that filters fields out to retain only the ones that
+            are necessary for the connector to function with OAuth. (some fields could be used during oauth flows but not needed afterwards, therefore
+            they would be listed in the `complete_oauth_server_input_specification` but not `complete_oauth_server_output_specification`)
+            Must be a valid non-nested JSON describing additional fields configured by the Airbyte Instance or Workspace Admins to be used by the
+            connector when using OAuth flow APIs.
+            These fields are to be merged back to `ConnectorSpecification.connectionSpecification`.
+            For each field, a special annotation `path_in_connector_config` can be specified to determine where to merge it,
+
+            Examples:
+
+                  complete_oauth_server_output_specification={
+                    client_id: {
+                      type: string,
+                      path_in_connector_config: ['credentials', 'client_id']
+                    },
+                    client_secret: {
+                      type: string,
+                      path_in_connector_config: ['credentials', 'client_secret']
+                    }
+                  }
+          $ref: "#/components/schemas/OAuthConfiguration"
+    SourceOauthConsentRequest:
+      type: object
+      required:
+        - sourceDefinitionId
+        - workspaceId
+        - redirectUrl
+      properties:
+        sourceDefinitionId:
+          $ref: "#/components/schemas/SourceDefinitionId"
+        workspaceId:
+          $ref: "#/components/schemas/WorkspaceId"
+        redirectUrl:
+          description: The url to redirect to after getting the user consent
+          type: string
+        oAuthInputConfiguration:
+          $ref: "#/components/schemas/OAuthInputConfiguration"
+    DestinationOauthConsentRequest:
+      type: object
+      required:
+        - destinationDefinitionId
+        - workspaceId
+        - redirectUrl
+      properties:
+        destinationDefinitionId:
+          $ref: "#/components/schemas/DestinationDefinitionId"
+        workspaceId:
+          $ref: "#/components/schemas/WorkspaceId"
+        redirectUrl:
+          description: The url to redirect to after getting the user consent
+          type: string
+        oAuthInputConfiguration:
+          $ref: "#/components/schemas/OAuthInputConfiguration"
+    OAuthConsentRead:
+      type: object
+      required:
+        - consentUrl
+      properties:
+        consentUrl:
+          type: string
+    CompleteSourceOauthRequest:
+      type: object
+      required:
+        - sourceDefinitionId
+        - workspaceId
+      properties:
+        sourceDefinitionId:
+          $ref: "#/components/schemas/SourceDefinitionId"
+        workspaceId:
+          $ref: "#/components/schemas/WorkspaceId"
+        redirectUrl:
+          description: When completing OAuth flow to gain an access token, some API sometimes requires to verify that the app re-send the redirectUrl that was used when consent was given.
+          type: string
+        queryParams:
+          description: The query parameters present in the redirect URL after a user granted consent e.g auth code
+          type: object
+          additionalProperties: true # Oauth parameters like code, state, etc.. will be different per API so we don't specify them in advance
+        oAuthInputConfiguration:
+          $ref: "#/components/schemas/OAuthInputConfiguration"
+    CompleteDestinationOAuthRequest:
+      type: object
+      required:
+        - destinationDefinitionId
+        - workspaceId
+      properties:
+        destinationDefinitionId:
+          $ref: "#/components/schemas/DestinationDefinitionId"
+        workspaceId:
+          $ref: "#/components/schemas/WorkspaceId"
+        redirectUrl:
+          description: When completing OAuth flow to gain an access token, some API sometimes requires to verify that the app re-send the redirectUrl that was used when consent was given.
+          type: string
+        queryParams:
+          description: The query parameters present in the redirect URL after a user granted consent e.g auth code
+          type: object
+          additionalProperties: true # Oauth parameters like code, state, etc.. will be different per API so we don't specify them in advance
+        oAuthInputConfiguration:
+          $ref: "#/components/schemas/OAuthInputConfiguration"
+    CompleteOAuthResponse:
+      type: object
+      additionalProperties: true # Oauth parameters like refresh/access token etc.. will be different per API so we don't specify them in advance
+    SetInstancewideSourceOauthParamsRequestBody:
+      type: object
+      required:
+        - sourceDefinitionId
+        - params
+      properties:
+        sourceDefinitionId:
+          $ref: "#/components/schemas/SourceDefinitionId"
+        params:
+          type: object
+          additionalProperties: true
+    SetInstancewideDestinationOauthParamsRequestBody:
+      type: object
+      required:
+        - destinationDefinitionId
+        - params
+      properties:
+        destinationDefinitionId:
+          $ref: "#/components/schemas/DestinationDefinitionId"
+        params:
+          type: object
+          additionalProperties: true
     # Web Backend
-    WbConnectionRead:
+    WebBackendConnectionRead:
       type: object
       required:
         - connectionId
@@ -2444,8 +3836,16 @@ components:
           $ref: "#/components/schemas/ConnectionId"
         name:
           type: string
+        namespaceDefinition:
+          $ref: "#/components/schemas/NamespaceDefinitionType"
+        namespaceFormat:
+          type: string
+          description: Used when namespaceDefinition is 'customformat'. If blank then behaves like namespaceDefinition = 'destination'. If "${SOURCE_NAMESPACE}" then behaves like namespaceDefinition = 'source'.
+          default: null
+          example: "${SOURCE_NAMESPACE}"
         prefix:
           type: string
+          description: Prefix that will be prepended to the name of each stream when it is written to the destination.
         sourceId:
           $ref: "#/components/schemas/SourceId"
         destinationId:
@@ -2465,7 +3865,9 @@ components:
         destination:
           $ref: "#/components/schemas/DestinationRead"
         operations:
-          $ref: "#/components/schemas/OperationReadList"
+          type: array
+          items:
+            $ref: "#/components/schemas/OperationRead"
         latestSyncJobCreatedAt:
           description: epoch time of the latest sync job. null if no sync job has taken place.
           type: integer
@@ -2474,7 +3876,9 @@ components:
           $ref: "#/components/schemas/JobStatus"
         isSyncing:
           type: boolean
-    WbConnectionReadList:
+        resourceRequirements:
+          $ref: "#/components/schemas/ResourceRequirements"
+    WebBackendConnectionReadList:
       type: object
       required:
         - connections
@@ -2482,7 +3886,7 @@ components:
         connections:
           type: array
           items:
-            $ref: "#/components/schemas/WbConnectionRead"
+            $ref: "#/components/schemas/WebBackendConnectionRead"
     SyncMode:
       type: string
       enum:
@@ -2511,8 +3915,119 @@ components:
             - failed
         reason:
           type: string
+    ResourceId:
+      type: string
+      format: uuid
+    UploadRead:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum:
+            - succeeded
+            - failed
+        resourceId:
+          $ref: "#/components/schemas/ResourceId"
+    ImportRequestBody:
+      type: object
+      required:
+        - resourceId
+        - workspaceId
+      properties:
+        resourceId:
+          $ref: "#/components/schemas/ResourceId"
+        workspaceId:
+          $ref: "#/components/schemas/WorkspaceId"
+    InvalidInputProperty:
+      type: object
+      required:
+        - propertyPath
+      properties:
+        propertyPath:
+          type: string
+        invalidValue:
+          type: string
+        message:
+          type: string
+    NotFoundKnownExceptionInfo:
+      type: object
+      required:
+        - message
+      properties:
+        id:
+          type: string
+        message:
+          type: string
+        exceptionClassName:
+          type: string
+        exceptionStack:
+          type: array
+          items:
+            type: string
+        rootCauseExceptionClassName:
+          type: string
+        rootCauseExceptionStack:
+          type: array
+          items:
+            type: string
+    KnownExceptionInfo:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+        exceptionClassName:
+          type: string
+        exceptionStack:
+          type: array
+          items:
+            type: string
+        rootCauseExceptionClassName:
+          type: string
+        rootCauseExceptionStack:
+          type: array
+          items:
+            type: string
+    InvalidInputExceptionInfo:
+      type: object
+      required:
+        - message
+        - validationErrors
+      properties:
+        message:
+          type: string
+        exceptionClassName:
+          type: string
+        exceptionStack:
+          type: array
+          items:
+            type: string
+        validationErrors:
+          type: array
+          items:
+            $ref: "#/components/schemas/InvalidInputProperty"
+
   responses:
-    InvalidInput:
-      description: Invalid Input
+    NotFoundResponse:
+      description: Object with given id was not found.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/NotFoundKnownExceptionInfo"
+    InvalidInputResponse:
+      description: Input failed validation
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/InvalidInputExceptionInfo"
+    ExceptionResponse:
+      description: Exception occurred; see message for details.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/KnownExceptionInfo"
 security:
   - {}

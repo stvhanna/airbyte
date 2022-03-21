@@ -1,13 +1,10 @@
 import { ReadShape, Resource, SchemaDetail } from "rest-hooks";
+
 import BaseResource from "./BaseResource";
 import Status from "core/statuses";
-import { NetworkError } from "core/request/NetworkError";
 import { ConnectionSpecification } from "core/domain/connection";
-import { Logs, JobItem } from "core/resources/Job";
-
-export type JobInfo = JobItem & {
-  logs: Logs;
-};
+import { JobInfo } from "core/domain/job/Job";
+import { LogsRequestError } from "core/request/LogsRequestError";
 
 export interface Scheduler {
   status: string;
@@ -55,13 +52,7 @@ export default class SchedulerResource
             status: result.status,
           };
 
-          const e = new NetworkError(result);
-          // Generate error with failed status and received logs
-          e.status = 400;
-          e.response = jobInfo;
-          e.message = result.message || "";
-
-          throw e;
+          throw new LogsRequestError(jobInfo, jobInfo, result.message);
         }
 
         return result;
@@ -97,13 +88,7 @@ export default class SchedulerResource
             status: result.status,
           };
 
-          const e = new NetworkError(result);
-          // Generate error with failed status and received logs
-          e.status = 400;
-          e.response = jobInfo;
-          e.message = result.message || "";
-
-          throw e;
+          throw new LogsRequestError(jobInfo, jobInfo, result.message);
         }
 
         return result;

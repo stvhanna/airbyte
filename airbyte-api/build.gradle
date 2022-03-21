@@ -1,7 +1,7 @@
 import org.openapitools.generator.gradle.plugin.tasks.GenerateTask
 
 plugins {
-    id "org.openapi.generator" version "5.0.0-beta"
+    id "org.openapi.generator" version "5.2.0"
     id "java-library"
 }
 
@@ -22,11 +22,13 @@ task generateApiServer(type: GenerateTask) {
     modelPackage = "io.airbyte.api.model"
 
     importMappings = [
+            'OAuthConfiguration'                : 'com.fasterxml.jackson.databind.JsonNode',
             'SourceDefinitionSpecification'     : 'com.fasterxml.jackson.databind.JsonNode',
             'SourceConfiguration'               : 'com.fasterxml.jackson.databind.JsonNode',
             'DestinationDefinitionSpecification': 'com.fasterxml.jackson.databind.JsonNode',
             'DestinationConfiguration'          : 'com.fasterxml.jackson.databind.JsonNode',
             'StreamJsonSchema'                  : 'com.fasterxml.jackson.databind.JsonNode',
+            'ConnectionStateObject'             : 'com.fasterxml.jackson.databind.JsonNode',
     ]
 
     generateApiDocumentation = false
@@ -54,11 +56,13 @@ task generateApiClient(type: GenerateTask) {
     modelPackage = "io.airbyte.api.client.model"
 
     importMappings = [
+            'OAuthConfiguration'                : 'com.fasterxml.jackson.databind.JsonNode',
             'SourceDefinitionSpecification'     : 'com.fasterxml.jackson.databind.JsonNode',
             'SourceConfiguration'               : 'com.fasterxml.jackson.databind.JsonNode',
             'DestinationDefinitionSpecification': 'com.fasterxml.jackson.databind.JsonNode',
             'DestinationConfiguration'          : 'com.fasterxml.jackson.databind.JsonNode',
             'StreamJsonSchema'                  : 'com.fasterxml.jackson.databind.JsonNode',
+            'ConnectionStateObject'             : 'com.fasterxml.jackson.databind.JsonNode',
     ]
 
     library = "native"
@@ -85,11 +89,13 @@ task generateApiDocs(type: GenerateTask) {
     modelPackage = "io.airbyte.api.client.model"
 
     importMappings = [
+            'OAuthConfiguration'                : 'com.fasterxml.jackson.databind.JsonNode',
             'SourceDefinitionSpecification'     : 'com.fasterxml.jackson.databind.JsonNode',
             'SourceConfiguration'               : 'com.fasterxml.jackson.databind.JsonNode',
             'DestinationDefinitionSpecification': 'com.fasterxml.jackson.databind.JsonNode',
             'DestinationConfiguration'          : 'com.fasterxml.jackson.databind.JsonNode',
             'StreamJsonSchema'                  : 'com.fasterxml.jackson.databind.JsonNode',
+            'ConnectionStateObject'             : 'com.fasterxml.jackson.databind.JsonNode',
     ]
 
     generateApiDocumentation = false

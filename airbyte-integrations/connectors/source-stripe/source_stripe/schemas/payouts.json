@@ -74,8 +74,7 @@
       "type": ["null", "object"]
     },
     "date": {
-      "type": ["null", "string"],
-      "format": "date-time"
+      "type": ["null", "integer"]
     },
     "method": {
       "type": ["null", "string"]
@@ -117,18 +116,13 @@
       "type": ["null", "string"]
     },
     "arrival_date": {
-      "type": ["null", "string"],
-      "format": "date-time"
+      "type": ["null", "integer"]
     },
     "description": {
       "type": ["null", "string"]
     },
     "source_transaction": {
       "type": ["null", "string"]
-    },
-    "updated": {
-      "type": ["null", "string"],
-      "format": "date-time"
     }
   },
   "type": ["null", "object"]

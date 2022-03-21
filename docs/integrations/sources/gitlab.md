@@ -4,8 +4,6 @@
 
 The Gitlab source supports both Full Refresh and Incremental syncs. You can choose if this connector will copy only the new or updated data, or all rows in the tables and columns you set up for replication, every time a sync is run.
 
-This Gitlab source wraps the [Singer Gitlab Tap](https://gitlab.com/meltano/tap-gitlab).
-
 ### Output schema
 
 This connector outputs the following streams:
@@ -15,7 +13,7 @@ This connector outputs the following streams:
 * [Issues](https://docs.gitlab.com/ee/api/issues.html) \(Incremental\)
 * [Pipelines](https://docs.gitlab.com/ee/api/pipelines.html) \(Incremental\)
 * [Jobs](https://docs.gitlab.com/ee/api/jobs.html)
-* [Projects](https://docs.gitlab.com/ee/api/projects.html) \(Incremental\)
+* [Projects](https://docs.gitlab.com/ee/api/projects.html)
 * [Project Milestones](https://docs.gitlab.com/ee/api/milestones.html)
 * [Project Merge Requests](https://docs.gitlab.com/ee/api/merge_requests.html) \(Incremental\)
 * [Users](https://docs.gitlab.com/ee/api/users.html)
@@ -26,7 +24,7 @@ This connector outputs the following streams:
 * [Releases](https://docs.gitlab.com/ee/api/releases/index.html)
 * [Group Labels](https://docs.gitlab.com/ee/api/group_labels.html)
 * [Project Labels](https://docs.gitlab.com/ee/api/labels.html)
-* [Epics](https://docs.gitlab.com/ee/api/epics.html) \(Incremental, only available for GitLab Ultimate and GitLab.com Gold accounts\)
+* [Epics](https://docs.gitlab.com/ee/api/epics.html) \(only available for GitLab Ultimate and GitLab.com Gold accounts\)
 * [Epic Issues](https://docs.gitlab.com/ee/api/epic_issues.html) \(only available for GitLab Ultimate and GitLab.com Gold accounts\)
 
 ### Features
@@ -54,4 +52,17 @@ Gitlab has the [rate limits](https://docs.gitlab.com/ee/user/gitlab_com/index.ht
 Log into Gitlab and then generate a [personal access token](https://docs.gitlab.com/ee/user/profile/personal_access_tokens.html).
 
 Your token should have the `read_api` scope, that Grants read access to the API, including all groups and projects, the container registry, and the package registry.
+
+## Additional information
+
+GitLab source is working with GitLab API v4. It can also work with self-hosted GitLab API v4.
+
+## Changelog
+
+| Version | Date | Pull Request | Subject |
+| :--- | :--- | :--- | :--- |
+| 0.1.3 | 2021-12-21 | [8991](https://github.com/airbytehq/airbyte/pull/8991) | Update connector fields title/description |
+| 0.1.2 | 2021-10-18 | [7108](https://github.com/airbytehq/airbyte/pull/7108) | Allow all domains to be used as `api_url` |
+| 0.1.1 | 2021-10-12 | [6932](https://github.com/airbytehq/airbyte/pull/6932) | Fix pattern field in spec file, remove unused fields from config files, use cache from CDK |
+| 0.1.0 | 2021-07-06 | [4174](https://github.com/airbytehq/airbyte/pull/4174) | Initial Release |
 

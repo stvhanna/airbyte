@@ -1,35 +1,16 @@
 #
-# MIT License
-#
-# Copyright (c) 2020 Airbyte
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
+# Copyright (c) 2021 Airbyte, Inc., all rights reserved.
 #
 
 
 from abc import ABC, abstractmethod
 from functools import partial
+from itertools import count
 from typing import Any, Callable, Iterator, Mapping, MutableMapping, Optional, Sequence
 
 import pendulum
 import requests
-from base_python.entrypoint import logger  # FIXME (Eugene K): use standard logger
+from airbyte_cdk.entrypoint import logger  # FIXME (Eugene K): use standard logger
 from requests import HTTPError
 from source_freshdesk.errors import (
     FreshdeskAccessDenied,
@@ -45,7 +26,13 @@ from source_freshdesk.utils import CallCredit, retry_after_handler, retry_connec
 
 class API:
     def __init__(
-        self, domain: str, api_key: str, requests_per_minute: int = None, verify: bool = True, proxies: MutableMapping[str, Any] = None
+        self,
+        domain: str,
+        api_key: str,
+        requests_per_minute: int = None,
+        verify: bool = True,
+        proxies: MutableMapping[str, Any] = None,
+        start_date: str = None,
     ):
         """Basic HTTP interface to read from endpoints"""
         self._api_prefix = f"https://{domain.rstrip('/')}/api/v2/"
@@ -59,6 +46,12 @@ class API:
         }
 
         self._call_credit = CallCredit(balance=requests_per_minute) if requests_per_minute else None
+
+        # By default, only tickets that have been created within the past 30 days will be returned.
+        # Since this logic rely not on updated tickets, it can break tickets dependant streams - conversations.
+        # So updated_since parameter will be always used in tickets streams. And start_date will be used too
+        # with default value 30 days look back.
+        self._start_date = pendulum.parse(start_date) if start_date else pendulum.now() - pendulum.duration(days=30)
 
         if domain.find("freshdesk.com") < 0:
             raise AttributeError("Freshdesk v2 API works only via Freshdesk domains and not via custom CNAMEs")
@@ -122,7 +115,6 @@ class StreamAPI(ABC):
     """Basic stream API that allows to iterate over entities"""
 
     result_return_limit = 100  # maximum value
-    maximum_page = 500  # see https://developers.freshdesk.com/api/#best_practices
     call_credit = 1  # see https://developers.freshdesk.com/api/#embedding
 
     def __init__(self, api: API, *args, **kwargs):
@@ -141,12 +133,21 @@ class StreamAPI(ABC):
     def read(self, getter: Callable, params: Mapping[str, Any] = None) -> Iterator:
         """Read using getter"""
         params = params or {}
-        for page in range(1, self.maximum_page):
-            batch = list(getter(params={**params, "per_page": self.result_return_limit, "page": page}))
+
+        for page in count(start=1):
+            batch = list(
+                getter(
+                    params={
+                        **params,
+                        "per_page": self.result_return_limit,
+                        "page": page,
+                    }
+                )
+            )
             yield from batch
 
             if len(batch) < self.result_return_limit:
-                break
+                return iter(())
 
 
 class IncrementalStreamAPI(StreamAPI, ABC):
@@ -157,7 +158,7 @@ class IncrementalStreamAPI(StreamAPI, ABC):
     def state(self) -> Optional[Mapping[str, Any]]:
         """Current state, if wasn't set return None"""
         if self._state:
-            return {self.state_pk: str(self._state)}
+            return {self.state_pk: str(self._state).replace("+00:00", "Z")}
         return None
 
     @state.setter
@@ -172,7 +173,7 @@ class IncrementalStreamAPI(StreamAPI, ABC):
         """Build query parameters responsible for current state"""
         if self._state:
             return {self.state_filter: self._state}
-        return {}
+        return {self.state_filter: self._api._start_date}
 
     @property
     def name(self):
@@ -263,8 +264,69 @@ class TicketsAPI(IncrementalStreamAPI):
 
     def list(self, fields: Sequence[str] = None) -> Iterator[dict]:
         """Iterate over entities"""
-        params = {"include": "description"}
+        includes = ["description", "requester", "stats"]
+        params = {"include": ",".join(includes)}
         yield from self.read(partial(self._api_get, url="tickets"), params=params)
+
+    @staticmethod
+    def get_tickets(
+        result_return_limit: int, getter: Callable, params: Mapping[str, Any] = None, ticket_paginate_limit: int = 300
+    ) -> Iterator:
+        """
+        Read using getter
+
+        This block extends TicketsAPI Stream to overcome '300 page' server error.
+        Since the TicketsAPI Stream list has a 300 page pagination limit, after 300 pages, update the parameters with
+        query using 'updated_since' = last_record, if there is more data remaining.
+        """
+        params = params or {}
+
+        # Start page
+        page = 1
+        # Initial request parameters
+        params = {
+            **params,
+            "order_type": "asc",  # ASC order, to get the old records first
+            "order_by": "updated_at",
+            "per_page": result_return_limit,
+        }
+
+        while True:
+            params["page"] = page
+            batch = list(getter(params=params))
+            yield from batch
+
+            if len(batch) < result_return_limit:
+                return iter(())
+
+            # checkpoint & switch the pagination
+            if page == ticket_paginate_limit:
+                # get last_record from latest batch, pos. -1, because of ACS order of records
+                last_record_updated_at = batch[-1]["updated_at"]
+                page = 0  # reset page counter
+                last_record_updated_at = pendulum.parse(last_record_updated_at)
+                # updating request parameters with last_record state
+                params["updated_since"] = last_record_updated_at
+                # Increment page
+            page += 1
+
+    # Override the super().read() method with modified read for tickets
+    def read(self, getter: Callable, params: Mapping[str, Any] = None) -> Iterator:
+        """Read using getter, patched to respect current state"""
+        params = params or {}
+        params = {**params, **self._state_params()}
+        latest_cursor = None
+        for record in self.get_tickets(self.result_return_limit, getter, params):
+            cursor = pendulum.parse(record[self.state_pk])
+            # filter out records older then state
+            if self._state and self._state >= cursor:
+                continue
+            latest_cursor = max(cursor, latest_cursor) if latest_cursor else cursor
+            yield record
+
+        if latest_cursor:
+            logger.info(f"Advancing bookmark for {self.name} stream from {self._state} to {latest_cursor}")
+            self._state = max(latest_cursor, self._state) if self._state else latest_cursor
 
 
 class TimeEntriesAPI(ClientIncrementalStreamAPI):
@@ -286,8 +348,10 @@ class ConversationsAPI(ClientIncrementalStreamAPI):
             yield from self.read(partial(self._api_get, url=url))
 
 
-class SatisfactionRatingsAPI(ClientIncrementalStreamAPI):
+class SatisfactionRatingsAPI(IncrementalStreamAPI):
     """Surveys satisfaction replies"""
+
+    state_filter = "created_since"
 
     def list(self, fields: Sequence[str] = None) -> Iterator[dict]:
         """Iterate over entities"""

@@ -12,6 +12,12 @@ required:
   - sourceDockerImage
   - destinationDockerImage
 properties:
+  namespaceDefinition:
+    "$ref": NamespaceDefinitionType.yaml
+  namespaceFormat:
+    type: string
+    default: null
+    example: "${SOURCE_NAMESPACE}"
   prefix:
     description: Prefix that will be prepended to the name of each stream when it is written to the destination.
     type: string
@@ -33,6 +39,14 @@ properties:
   destinationDockerImage:
     description: Image name of the destination with tag.
     type: string
+  sourceResourceRequirements:
+    type: object
+    description: optional resource requirements to use in source container - this is used instead of `resourceRequirements` for the source container
+    existingJavaType: io.airbyte.config.ResourceRequirements
+  destinationResourceRequirements:
+    type: object
+    description: optional resource requirements to use in dest container - this is used instead of `resourceRequirements` for the dest container
+    existingJavaType: io.airbyte.config.ResourceRequirements
   operationSequence:
     description: Sequence of configurations of operations to apply as part of the sync
     type: array
@@ -41,3 +55,7 @@ properties:
   state:
     description: optional state of the previous run. this object is defined per integration.
     "$ref": State.yaml
+  resourceRequirements:
+    type: object
+    description: optional resource requirements to run sync workers - this is used for containers other than the source/dest containers
+    existingJavaType: io.airbyte.config.ResourceRequirements

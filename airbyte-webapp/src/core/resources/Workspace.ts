@@ -1,26 +1,7 @@
 import { MutateShape, ReadShape, Resource, SchemaDetail } from "rest-hooks";
+
 import BaseResource from "./BaseResource";
-
-export interface Notification {
-  notificationType: string;
-  slackConfiguration: {
-    webhook: string;
-  };
-}
-
-export interface Workspace {
-  workspaceId: string;
-  customerId: string;
-  name: string;
-  email: string;
-  slug: string;
-  initialSetupComplete: boolean;
-  anonymousDataCollection: boolean;
-  news: boolean;
-  securityUpdates: boolean;
-  displaySetupWizard: boolean;
-  notifications: Notification[];
-}
+import { Notification, Workspace } from "core/domain/workspace/Workspace";
 
 export default class WorkspaceResource
   extends BaseResource
@@ -45,7 +26,7 @@ export default class WorkspaceResource
 
   static listShape<T extends typeof Resource>(
     this: T
-  ): ReadShape<SchemaDetail<Workspace[]>> {
+  ): ReadShape<SchemaDetail<{ workspaces: Workspace[] }>> {
     return {
       ...super.listShape(),
       schema: { workspaces: [this] },

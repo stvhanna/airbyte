@@ -1,6 +1,6 @@
-import { JSONSchema7, JSONSchema7Definition } from "json-schema";
-
 import { FormBlock } from "core/form/types";
+import { AirbyteJSONSchemaDefinition, AirbyteJSONSchema } from "./types";
+import { isDefined } from "../../utils/common";
 
 /**
  * Returns {@link FormBlock} representation of jsonSchema
@@ -14,10 +14,10 @@ import { FormBlock } from "core/form/types";
  * @param parentSchema
  */
 export const jsonSchemaToUiWidget = (
-  jsonSchema: JSONSchema7Definition,
+  jsonSchema: AirbyteJSONSchemaDefinition,
   key = "",
   path: string = key,
-  parentSchema?: JSONSchema7Definition
+  parentSchema?: AirbyteJSONSchemaDefinition
 ): FormBlock => {
   const isRequired = isKeyRequired(key, parentSchema);
 
@@ -39,7 +39,14 @@ export const jsonSchemaToUiWidget = (
         if (typeof condition === "boolean") {
           return [];
         }
-        return [condition.title, jsonSchemaToUiWidget(condition, key, path)];
+        return [
+          condition.title,
+          jsonSchemaToUiWidget(
+            { ...condition, type: jsonSchema.type },
+            key,
+            path
+          ),
+        ];
       })
     );
 
@@ -70,9 +77,9 @@ export const jsonSchemaToUiWidget = (
     };
   }
 
-  if (jsonSchema.properties) {
+  if (jsonSchema.type === "object") {
     const properties = Object.entries(
-      jsonSchema.properties
+      jsonSchema.properties || []
     ).map(([k, schema]) =>
       jsonSchemaToUiWidget(schema, k, path ? `${path}.${k}` : k, jsonSchema)
     );
@@ -83,6 +90,7 @@ export const jsonSchemaToUiWidget = (
       jsonSchema,
       path: path || key,
       fieldKey: key,
+      hasOauth: jsonSchema.is_auth,
       properties,
       isRequired,
     };
@@ -94,8 +102,8 @@ export const jsonSchemaToUiWidget = (
     path: path || key,
     fieldKey: key,
     isRequired,
-    isSecret: (jsonSchema as { airbyte_secret: boolean }).airbyte_secret,
-    multiline: (jsonSchema as { multiline: boolean }).multiline,
+    isSecret: !!jsonSchema.airbyte_secret,
+    multiline: !!jsonSchema.multiline,
     type:
       (Array.isArray(jsonSchema.type) ? jsonSchema.type[0] : jsonSchema.type) ??
       "null",
@@ -104,7 +112,7 @@ export const jsonSchemaToUiWidget = (
 
 function isKeyRequired(
   key: string,
-  parentSchema?: JSONSchema7Definition
+  parentSchema?: AirbyteJSONSchemaDefinition
 ): boolean {
   const isRequired =
     (typeof parentSchema !== "boolean" &&
@@ -115,16 +123,43 @@ function isKeyRequired(
   return isRequired;
 }
 
-const pickDefaultFields = (schema: JSONSchema7): Partial<JSONSchema7> => ({
-  default: schema.default,
-  examples: schema.examples,
-  description: schema.description,
-  pattern: schema.pattern,
-  title: schema.title,
-  enum:
+const defaultFields: Array<keyof AirbyteJSONSchema> = [
+  "default",
+  "examples",
+  "description",
+  "pattern",
+  "order",
+  "const",
+  "title",
+
+  // airbyte specific fields
+  "airbyte_hidden",
+];
+
+const pickDefaultFields = (
+  schema: AirbyteJSONSchema
+): Partial<AirbyteJSONSchema> => {
+  const partialSchema: Partial<AirbyteJSONSchema> = {
+    ...Object.fromEntries(
+      Object.entries(schema).filter(([k]) =>
+        defaultFields.includes(k as keyof AirbyteJSONSchema)
+      )
+    ),
+  };
+
+  if (
     typeof schema.items === "object" &&
     !Array.isArray(schema.items) &&
     schema.items.enum
-      ? schema.items.enum
-      : schema.enum,
-});
+  ) {
+    partialSchema.enum = schema.items.enum;
+  } else if (schema.enum) {
+    if (schema.enum?.length === 1 && isDefined(schema.default)) {
+      partialSchema.const = schema.default;
+    } else {
+      partialSchema.enum = schema.enum;
+    }
+  }
+
+  return partialSchema;
+};

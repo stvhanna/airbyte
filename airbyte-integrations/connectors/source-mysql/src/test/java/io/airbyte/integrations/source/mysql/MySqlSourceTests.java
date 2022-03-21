@@ -1,25 +1,5 @@
 /*
- * MIT License
- *
- * Copyright (c) 2020 Airbyte
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * Copyright (c) 2021 Airbyte, Inc., all rights reserved.
  */
 
 package io.airbyte.integrations.source.mysql;
@@ -29,12 +9,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.google.common.collect.ImmutableMap;
 import io.airbyte.commons.json.Jsons;
-import io.airbyte.db.Database;
+import io.airbyte.commons.string.Strings;
 import io.airbyte.protocol.models.AirbyteConnectionStatus;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.util.Properties;
-import org.apache.commons.lang3.RandomStringUtils;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.MySQLContainer;
 
@@ -42,39 +21,35 @@ public class MySqlSourceTests {
 
   private static final String TEST_USER = "test";
   private static final String TEST_PASSWORD = "test";
-  private static MySQLContainer<?> container;
-
-  private JsonNode config;
-  private Database database;
 
   @Test
   public void testSettingTimezones() throws Exception {
     // start DB
-    container = new MySQLContainer<>("mysql:8.0")
+    final MySQLContainer<?> container = new MySQLContainer<>("mysql:8.0")
         .withUsername(TEST_USER)
         .withPassword(TEST_PASSWORD)
         .withEnv("MYSQL_ROOT_HOST", "%")
         .withEnv("MYSQL_ROOT_PASSWORD", TEST_PASSWORD)
         .withEnv("TZ", "Europe/Moscow");
     container.start();
-    Properties properties = new Properties();
+    final Properties properties = new Properties();
     properties.putAll(ImmutableMap.of("user", "root", "password", TEST_PASSWORD, "serverTimezone", "Europe/Moscow"));
     DriverManager.getConnection(container.getJdbcUrl(), properties);
-    String dbName = "db_" + RandomStringUtils.randomAlphabetic(10);
-    config = getConfig(container, dbName, "serverTimezone=Europe/Moscow");
+    final String dbName = Strings.addRandomSuffix("db", "_", 10);
+    final JsonNode config = getConfig(container, dbName, "serverTimezone=Europe/Moscow");
 
-    try (Connection connection = DriverManager.getConnection(container.getJdbcUrl(), properties)) {
+    try (final Connection connection = DriverManager.getConnection(container.getJdbcUrl(), properties)) {
       connection.createStatement().execute("GRANT ALL PRIVILEGES ON *.* TO '" + TEST_USER + "'@'%';\n");
       connection.createStatement().execute("CREATE DATABASE " + config.get("database").asText());
     }
-    AirbyteConnectionStatus check = new MySqlSource().check(config);
+    final AirbyteConnectionStatus check = new MySqlSource().check(config);
     assertEquals(AirbyteConnectionStatus.Status.SUCCEEDED, check.getStatus());
 
     // cleanup
     container.close();
   }
 
-  private static JsonNode getConfig(MySQLContainer dbContainer, String dbName, String jdbcParams) {
+  private static JsonNode getConfig(final MySQLContainer dbContainer, final String dbName, final String jdbcParams) {
     return Jsons.jsonNode(ImmutableMap.builder()
         .put("host", dbContainer.getHost())
         .put("port", dbContainer.getFirstMappedPort())

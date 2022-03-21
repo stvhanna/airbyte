@@ -1,33 +1,17 @@
 /*
- * MIT License
- *
- * Copyright (c) 2020 Airbyte
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * Copyright (c) 2021 Airbyte, Inc., all rights reserved.
  */
 
 package io.airbyte.workers.protocols.airbyte;
 
-import io.airbyte.config.StandardTapConfig;
+import io.airbyte.commons.json.Jsons;
+import io.airbyte.config.WorkerSourceConfig;
 import io.airbyte.protocol.models.AirbyteMessage;
+import io.airbyte.protocol.models.AirbyteMessage.Type;
+import io.airbyte.protocol.models.AirbyteStateMessage;
 import java.nio.file.Path;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * This source will never emit any messages. It can be used in cases where that is helpful (hint:
@@ -35,20 +19,36 @@ import java.util.Optional;
  */
 public class EmptyAirbyteSource implements AirbyteSource {
 
+  private final AtomicBoolean hasEmittedState;
+
+  public EmptyAirbyteSource() {
+    hasEmittedState = new AtomicBoolean();
+  }
+
   @Override
-  public void start(StandardTapConfig input, Path jobRoot) throws Exception {
+  public void start(final WorkerSourceConfig sourceConfig, final Path jobRoot) throws Exception {
     // no op.
   }
 
   // always finished. it has no data to send.
   @Override
   public boolean isFinished() {
-    return true;
+    return hasEmittedState.get();
+  }
+
+  @Override
+  public int getExitValue() {
+    return 0;
   }
 
   @Override
   public Optional<AirbyteMessage> attemptRead() {
-    return Optional.empty();
+    if (!hasEmittedState.get()) {
+      hasEmittedState.compareAndSet(false, true);
+      return Optional.of(new AirbyteMessage().withType(Type.STATE).withState(new AirbyteStateMessage().withData(Jsons.emptyObject())));
+    } else {
+      return Optional.empty();
+    }
   }
 
   @Override

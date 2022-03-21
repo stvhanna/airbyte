@@ -4,14 +4,14 @@ import { useResource } from "rest-hooks";
 
 import PageTitle from "components/PageTitle";
 import SourceForm from "./components/SourceForm";
-import { Routes } from "../../../routes";
-import useRouter from "components/hooks/useRouterHook";
-import config from "config";
+import useRouter from "hooks/useRouter";
 import SourceDefinitionResource from "core/resources/SourceDefinition";
-import useSource from "components/hooks/services/useSourceHook";
-import { FormPageContent } from "components/SourceAndDestinationsBlocks";
-import { JobInfo } from "core/resources/Scheduler";
+import useSource from "hooks/services/useSourceHook";
+import { FormPageContent } from "components/ConnectorBlocks";
 import { ConnectionConfiguration } from "core/domain/connection";
+import HeadTitle from "components/HeadTitle";
+import useWorkspace from "hooks/services/useWorkspace";
+import { JobInfo } from "core/domain/job/Job";
 
 const CreateSourcePage: React.FC = () => {
   const { push } = useRouter();
@@ -21,10 +21,12 @@ const CreateSourcePage: React.FC = () => {
     response: JobInfo;
   } | null>(null);
 
+  const { workspace } = useWorkspace();
+
   const { sourceDefinitions } = useResource(
     SourceDefinitionResource.listShape(),
     {
-      workspaceId: config.ui.workspaceId,
+      workspaceId: workspace.workspaceId,
     }
   );
   const { createSource } = useSource();
@@ -43,7 +45,7 @@ const CreateSourcePage: React.FC = () => {
       setSuccessRequest(true);
       setTimeout(() => {
         setSuccessRequest(false);
-        push(`${Routes.Source}/${result.sourceId}`);
+        push(`../${result.sourceId}`);
       }, 2000);
     } catch (e) {
       setErrorStatusRequest(e);
@@ -52,6 +54,7 @@ const CreateSourcePage: React.FC = () => {
 
   return (
     <>
+      <HeadTitle titles={[{ id: "sources.newSourceTitle" }]} />
       <PageTitle
         withLine
         title={<FormattedMessage id="sources.newSourceTitle" />}
@@ -63,7 +66,6 @@ const CreateSourcePage: React.FC = () => {
           sourceDefinitions={sourceDefinitions}
           hasSuccess={successRequest}
           error={errorStatusRequest}
-          jobInfo={errorStatusRequest?.response}
         />
       </FormPageContent>
     </>

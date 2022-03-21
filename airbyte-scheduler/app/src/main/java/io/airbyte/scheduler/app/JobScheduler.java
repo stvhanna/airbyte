@@ -1,46 +1,27 @@
 /*
- * MIT License
- *
- * Copyright (c) 2020 Airbyte
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * Copyright (c) 2021 Airbyte, Inc., all rights reserved.
  */
 
 package io.airbyte.scheduler.app;
 
 import com.google.common.annotations.VisibleForTesting;
+import io.airbyte.analytics.TrackingClient;
 import io.airbyte.config.StandardSync;
 import io.airbyte.config.StandardSync.Status;
-import io.airbyte.config.StandardSyncSchedule;
 import io.airbyte.config.persistence.ConfigNotFoundException;
 import io.airbyte.config.persistence.ConfigRepository;
 import io.airbyte.scheduler.models.Job;
 import io.airbyte.scheduler.persistence.DefaultJobCreator;
 import io.airbyte.scheduler.persistence.JobPersistence;
 import io.airbyte.scheduler.persistence.job_factory.DefaultSyncJobFactory;
+import io.airbyte.scheduler.persistence.job_factory.OAuthConfigSupplier;
 import io.airbyte.scheduler.persistence.job_factory.SyncJobFactory;
 import io.airbyte.validation.json.JsonValidationException;
+import io.airbyte.workers.WorkerConfigs;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiPredicate;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
@@ -52,13 +33,13 @@ public class JobScheduler implements Runnable {
 
   private final JobPersistence jobPersistence;
   private final ConfigRepository configRepository;
-  private final BiPredicate<Optional<Job>, StandardSyncSchedule> scheduleJobPredicate;
+  private final BiPredicate<Optional<Job>, StandardSync> scheduleJobPredicate;
   private final SyncJobFactory jobFactory;
 
   @VisibleForTesting
   JobScheduler(final JobPersistence jobPersistence,
                final ConfigRepository configRepository,
-               final BiPredicate<Optional<Job>, StandardSyncSchedule> scheduleJobPredicate,
+               final BiPredicate<Optional<Job>, StandardSync> scheduleJobPredicate,
                final SyncJobFactory jobFactory) {
     this.jobPersistence = jobPersistence;
     this.configRepository = configRepository;
@@ -66,48 +47,57 @@ public class JobScheduler implements Runnable {
     this.jobFactory = jobFactory;
   }
 
-  public JobScheduler(final JobPersistence jobPersistence,
-                      final ConfigRepository configRepository) {
+  public JobScheduler(final boolean connectorSpecificResourceDefaultsEnabled,
+                      final JobPersistence jobPersistence,
+                      final ConfigRepository configRepository,
+                      final TrackingClient trackingClient,
+                      final WorkerConfigs workerConfigs) {
     this(
         jobPersistence,
         configRepository,
         new ScheduleJobPredicate(Instant::now),
-        new DefaultSyncJobFactory(new DefaultJobCreator(jobPersistence), configRepository));
+        new DefaultSyncJobFactory(
+            connectorSpecificResourceDefaultsEnabled,
+            new DefaultJobCreator(jobPersistence, configRepository, workerConfigs.getResourceRequirements()),
+            configRepository,
+            new OAuthConfigSupplier(configRepository, trackingClient)));
   }
 
   @Override
   public void run() {
     try {
-      LOGGER.info("Running job-scheduler...");
+      LOGGER.debug("Running job-scheduler...");
 
       scheduleSyncJobs();
 
-      LOGGER.info("Completed Job-Scheduler...");
-    } catch (Throwable e) {
+      LOGGER.debug("Completed Job-Scheduler...");
+    } catch (final Throwable e) {
       LOGGER.error("Job Scheduler Error", e);
     }
   }
 
   private void scheduleSyncJobs() throws IOException {
-    final AtomicInteger jobsScheduled = new AtomicInteger();
+    int jobsScheduled = 0;
+    final var start = System.currentTimeMillis();
     final List<StandardSync> activeConnections = getAllActiveConnections();
+    final var queryEnd = System.currentTimeMillis();
+    LOGGER.debug("Total active connections: {}", activeConnections.size());
+    LOGGER.debug("Time to retrieve all connections: {} ms", queryEnd - start);
 
-    for (StandardSync connection : activeConnections) {
+    for (final StandardSync connection : activeConnections) {
       final Optional<Job> previousJobOptional = jobPersistence.getLastReplicationJob(connection.getConnectionId());
-      final StandardSyncSchedule standardSyncSchedule = getStandardSyncSchedule(connection);
 
-      if (scheduleJobPredicate.test(previousJobOptional, standardSyncSchedule)) {
+      if (scheduleJobPredicate.test(previousJobOptional, connection)) {
         jobFactory.create(connection.getConnectionId());
+        jobsScheduled++;
+        SchedulerApp.PENDING_JOBS.getAndIncrement();
       }
     }
-    LOGGER.info("Job-Scheduler Summary. Active connections: {}, Jobs scheduler: {}", activeConnections.size(), jobsScheduled.get());
-  }
+    final var end = System.currentTimeMillis();
+    LOGGER.debug("Time taken to schedule jobs: {} ms", end - start);
 
-  private StandardSyncSchedule getStandardSyncSchedule(StandardSync connection) {
-    try {
-      return configRepository.getStandardSyncSchedule(connection.getConnectionId());
-    } catch (JsonValidationException | IOException | ConfigNotFoundException e) {
-      throw new RuntimeException(e.getMessage(), e);
+    if (jobsScheduled > 0) {
+      LOGGER.info("Job-Scheduler Summary. Active connections: {}, Jobs scheduled this cycle: {}", activeConnections.size(), jobsScheduled);
     }
   }
 
@@ -117,7 +107,7 @@ public class JobScheduler implements Runnable {
           .stream()
           .filter(sync -> sync.getStatus() == Status.ACTIVE)
           .collect(Collectors.toList());
-    } catch (JsonValidationException | IOException | ConfigNotFoundException e) {
+    } catch (final JsonValidationException | IOException | ConfigNotFoundException e) {
       throw new RuntimeException(e.getMessage(), e);
     }
   }

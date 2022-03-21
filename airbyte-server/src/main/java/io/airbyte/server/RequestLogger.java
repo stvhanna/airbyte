@@ -1,31 +1,12 @@
 /*
- * MIT License
- *
- * Copyright (c) 2020 Airbyte
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * Copyright (c) 2021 Airbyte, Inc., all rights reserved.
  */
 
 package io.airbyte.server;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.google.common.annotations.VisibleForTesting;
 import io.airbyte.commons.json.Jsons;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -47,55 +28,79 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 
+/**
+ * This class implements two {@code filter()} methods that execute as part of the Jersey framework
+ * request/response chain.
+ * <p>
+ * The first {@code filter()} is the Request Filter. It takes an incoming
+ * {@link ContainerRequestContext} that contains request information, such as the request body. In
+ * this filter, we extract the request body and store it back on the request context as a custom
+ * property. We don't write any logs for requests. However, since we want to include the request
+ * body in logs for responses, we have to extract the request body in this filter.
+ * <p>
+ * The second @{code filter()} is the Response Filter. It takes an incoming
+ * {@link ContainerResponseContext} that contains response information, such as the status code.
+ * This method also has read-only access to the original {@link ContainerRequestContext}, where we
+ * set the request body as a custom property in the request filter. This is where we create and
+ * persist log lines that contain both the response status code and the original request body.
+ */
 public class RequestLogger implements ContainerRequestFilter, ContainerResponseFilter {
 
   private static final Logger LOGGER = LoggerFactory.getLogger(RequestLogger.class);
+  private static final String REQUEST_BODY_PROPERTY = "requestBodyProperty";
 
   @Context
   private HttpServletRequest servletRequest;
 
-  private String requestBody = null;
-
   private final Map<String, String> mdc;
 
-  public RequestLogger(Map<String, String> mdc) {
+  public RequestLogger(final Map<String, String> mdc) {
     this.mdc = mdc;
   }
 
+  @VisibleForTesting
+  RequestLogger(final Map<String, String> mdc, final HttpServletRequest servletRequest) {
+    this.mdc = mdc;
+    this.servletRequest = servletRequest;
+  }
+
   @Override
-  public void filter(ContainerRequestContext requestContext) throws IOException {
+  public void filter(final ContainerRequestContext requestContext) throws IOException {
     if (requestContext.getMethod().equals("POST")) {
       // hack to refill the entity stream so it doesn't interfere with other operations
-      ByteArrayOutputStream baos = new ByteArrayOutputStream();
+      final ByteArrayOutputStream baos = new ByteArrayOutputStream();
       IOUtils.copy(requestContext.getEntityStream(), baos);
-      InputStream entity = new ByteArrayInputStream(baos.toByteArray());
+      final InputStream entity = new ByteArrayInputStream(baos.toByteArray());
       requestContext.setEntityStream(new ByteArrayInputStream(baos.toByteArray()));
       // end hack
 
-      requestBody = IOUtils.toString(entity, MessageUtils.getCharset(requestContext.getMediaType()));
+      requestContext.setProperty(REQUEST_BODY_PROPERTY, IOUtils.toString(entity, MessageUtils.getCharset(requestContext.getMediaType())));
     }
   }
 
   @Override
-  public void filter(ContainerRequestContext requestContext, ContainerResponseContext responseContext) {
+  public void filter(final ContainerRequestContext requestContext, final ContainerResponseContext responseContext) {
     MDC.setContextMap(mdc);
 
-    String remoteAddr = servletRequest.getRemoteAddr();
-    String method = servletRequest.getMethod();
-    String url = servletRequest.getRequestURI();
-    int status = responseContext.getStatus();
+    final String remoteAddr = servletRequest.getRemoteAddr();
+    final String method = servletRequest.getMethod();
+    final String url = servletRequest.getRequestURI();
 
-    StringBuilder logBuilder = new StringBuilder()
-        .append("REQ ")
-        .append(remoteAddr)
-        .append(" ")
-        .append(method)
-        .append(" ")
-        .append(status)
-        .append(" ")
-        .append(url);
+    final String requestBody = (String) requestContext.getProperty(REQUEST_BODY_PROPERTY);
 
-    if (method.equals("POST") && requestBody != null && !requestBody.equals("")) {
+    final boolean isPrintable = servletRequest.getHeader("Content-Type") != null &&
+        servletRequest.getHeader("Content-Type").toLowerCase().contains("application/json") &&
+        isValidJson(requestBody);
+
+    final int status = responseContext.getStatus();
+
+    final StringBuilder logBuilder = createLogPrefix(
+        remoteAddr,
+        method,
+        status,
+        url);
+
+    if (method.equals("POST") && requestBody != null && !requestBody.equals("") && isPrintable) {
       logBuilder
           .append(" - ")
           .append(redactSensitiveInfo(requestBody));
@@ -108,18 +113,35 @@ public class RequestLogger implements ContainerRequestFilter, ContainerResponseF
     }
   }
 
+  @VisibleForTesting
+  static StringBuilder createLogPrefix(
+                                       final String remoteAddr,
+                                       final String method,
+                                       final int status,
+                                       final String url) {
+    return new StringBuilder()
+        .append("REQ ")
+        .append(remoteAddr)
+        .append(" ")
+        .append(method)
+        .append(" ")
+        .append(status)
+        .append(" ")
+        .append(url);
+  }
+
   private static final Set<String> TOP_LEVEL_SENSITIVE_FIELDS = Set.of(
       "connectionConfiguration");
 
-  private static String redactSensitiveInfo(String requestBody) {
-    Optional<JsonNode> jsonNodeOpt = Jsons.tryDeserialize(requestBody);
+  private static String redactSensitiveInfo(final String requestBody) {
+    final Optional<JsonNode> jsonNodeOpt = Jsons.tryDeserialize(requestBody);
 
     if (jsonNodeOpt.isPresent()) {
-      JsonNode jsonNode = jsonNodeOpt.get();
+      final JsonNode jsonNode = jsonNodeOpt.get();
       if (jsonNode instanceof ObjectNode) {
-        ObjectNode objectNode = (ObjectNode) jsonNode;
+        final ObjectNode objectNode = (ObjectNode) jsonNode;
 
-        for (String topLevelSensitiveField : TOP_LEVEL_SENSITIVE_FIELDS) {
+        for (final String topLevelSensitiveField : TOP_LEVEL_SENSITIVE_FIELDS) {
           if (objectNode.has(topLevelSensitiveField)) {
             objectNode.put(topLevelSensitiveField, "REDACTED");
           }
@@ -132,6 +154,10 @@ public class RequestLogger implements ContainerRequestFilter, ContainerResponseF
     }
 
     return requestBody;
+  }
+
+  private static boolean isValidJson(final String json) {
+    return Jsons.tryDeserialize(json).isPresent();
   }
 
 }

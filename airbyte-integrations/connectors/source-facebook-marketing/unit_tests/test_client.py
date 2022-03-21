@@ -1,42 +1,131 @@
 #
-# MIT License
-#
-# Copyright (c) 2020 Airbyte
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
+# Copyright (c) 2021 Airbyte, Inc., all rights reserved.
 #
 
+import json
 
+import pendulum
 import pytest
-from airbyte_protocol import AirbyteStream
-from source_facebook_marketing.client import Client, FacebookAPIException
+from airbyte_cdk.models import SyncMode
+from facebook_business import FacebookAdsApi, FacebookSession
+from facebook_business.exceptions import FacebookRequestError
+from source_facebook_marketing.streams import AdAccount, AdCreatives, Campaigns
+
+FB_API_VERSION = FacebookAdsApi.API_VERSION
 
 
-def test__health_check_with_wrong_token():
-    client = Client(account_id="wrong_account", access_token="wrong_key", start_date="2019-03-03T10:00")
-    alive, error = client.health_check()
+@pytest.fixture(name="fb_call_rate_response")
+def fb_call_rate_response_fixture():
+    error = {
+        "message": (
+            "(#80000) There have been too many calls from this ad-account. Wait a bit and try again. "
+            "For more info, please refer to https://developers.facebook.com/docs/graph-api/overview/rate-limiting."
+        ),
+        "type": "OAuthException",
+        "code": 80000,
+        "error_subcode": 2446079,
+        "fbtrace_id": "this_is_fake_response",
+    }
 
-    assert not alive
-    assert error == "Error: 190, Invalid OAuth access token."
+    headers = {"x-app-usage": json.dumps({"call_count": 28, "total_time": 25, "total_cputime": 25})}
+
+    return {
+        "json": {
+            "error": error,
+        },
+        "status_code": 400,
+        "headers": headers,
+    }
 
 
-def test__campaigns_with_wrong_token():
-    client = Client(account_id="wrong_account", access_token="wrong_key", start_date="2019-03-03T10:00")
-    with pytest.raises(FacebookAPIException, match="Error: 190, Invalid OAuth access token"):
-        next(client.read_stream(AirbyteStream(name="campaigns", json_schema={})))
+class TestBackoff:
+    def test_limit_reached(self, mocker, requests_mock, api, fb_call_rate_response, account_id):
+        """Error once, check that we retry and not fail"""
+        # turn Campaigns into non batch mode to test non batch logic
+        mocker.patch.object(Campaigns, "use_batch", new_callable=mocker.PropertyMock, return_value=False)
+        campaign_responses = [
+            fb_call_rate_response,
+            {
+                "json": {"data": [{"id": 1, "updated_time": "2020-09-25T00:00:00Z"}, {"id": 2, "updated_time": "2020-09-25T00:00:00Z"}]},
+                "status_code": 200,
+            },
+        ]
+
+        requests_mock.register_uri("GET", FacebookSession.GRAPH + f"/{FB_API_VERSION}/act_{account_id}/campaigns", campaign_responses)
+        requests_mock.register_uri("GET", FacebookSession.GRAPH + f"/{FB_API_VERSION}/1/", [{"status_code": 200}])
+        requests_mock.register_uri("GET", FacebookSession.GRAPH + f"/{FB_API_VERSION}/2/", [{"status_code": 200}])
+
+        stream = Campaigns(api=api, start_date=pendulum.now(), end_date=pendulum.now(), include_deleted=False)
+        try:
+            records = list(stream.read_records(sync_mode=SyncMode.full_refresh, stream_state={}))
+            assert records
+        except FacebookRequestError:
+            pytest.fail("Call rate error has not being handled")
+
+    def test_batch_limit_reached(self, requests_mock, api, fb_call_rate_response, account_id):
+        """Error once, check that we retry and not fail"""
+        responses = [
+            fb_call_rate_response,
+            {
+                "json": {
+                    "data": [
+                        {
+                            "id": "123",
+                            "object_type": "SHARE",
+                            "status": "ACTIVE",
+                        },
+                        {
+                            "id": "1234",
+                            "object_type": "SHARE",
+                            "status": "ACTIVE",
+                        },
+                    ],
+                    "status_code": 200,
+                }
+            },
+        ]
+
+        batch_responses = [
+            fb_call_rate_response,
+            {
+                "json": [
+                    {"body": json.dumps({"name": "creative 1"}), "code": 200, "headers": {}},
+                    {"body": json.dumps({"name": "creative 2"}), "code": 200, "headers": {}},
+                ]
+            },
+        ]
+
+        requests_mock.register_uri("GET", FacebookSession.GRAPH + f"/{FB_API_VERSION}/act_{account_id}/adcreatives", responses)
+        requests_mock.register_uri("POST", FacebookSession.GRAPH + f"/{FB_API_VERSION}/", batch_responses)
+
+        stream = AdCreatives(api=api, include_deleted=False)
+        records = list(stream.read_records(sync_mode=SyncMode.full_refresh, stream_state={}))
+
+        assert records == [{"name": "creative 1"}, {"name": "creative 2"}]
+
+    @pytest.mark.parametrize(
+        "error_response",
+        [
+            {"json": {"error": {}}, "status_code": 500},
+            {"json": {"error": {"code": 104}}},
+            {"json": {"error": {"code": 2}}, "status_code": 500},
+        ],
+        ids=["server_error", "connection_reset_error", "temporary_oauth_error"],
+    )
+    def test_common_error_retry(self, error_response, requests_mock, api, account_id):
+        """Error once, check that we retry and not fail"""
+        account_data = {"id": 1, "updated_time": "2020-09-25T00:00:00Z", "name": "Some name"}
+        responses = [
+            error_response,
+            {
+                "json": account_data,
+                "status_code": 200,
+            },
+        ]
+
+        requests_mock.register_uri("GET", FacebookSession.GRAPH + f"/{FB_API_VERSION}/act_{account_id}/", responses)
+
+        stream = AdAccount(api=api)
+        accounts = list(stream.read_records(sync_mode=SyncMode.full_refresh, stream_state={}))
+
+        assert accounts == [account_data]

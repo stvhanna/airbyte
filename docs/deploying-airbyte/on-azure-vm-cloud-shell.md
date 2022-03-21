@@ -51,13 +51,18 @@ This step will create a virtual machine and add a user account named `byteuser`.
 download ~/.ssh/id_rsa
 ```
 
+Make sure to update the permissions on the private key, or you'll get an error telling you that permissions for this file are too open.
+```bash
+chmod 600 ./$YOUR_PATH_TO_DOWNLOADS/id_rsa
+```
+
 Above command will generate download link and give you pop-up on right bottom side, click on `Click here to download your file.` to download private key. Note: Save this file, you will need it to connect to your VM in [Connect to Airbyte](on-azure-vm-cloud-shell.md#connect-to-airbyte) step.
 
 ![](../.gitbook/assets/azure_shell_download_ssh_key.png)
 
 ### Connect to virtual machine
 
-* Connect to virtual machine 
+If you get this error: `Could not resolve hostname "XX.XXX.X.XXX": Name or service not known`, just manually enter the publicIp host name when running the ssh command.
 
 ```bash
 # Inside Azure cloud shell
@@ -121,18 +126,18 @@ For security reasons, we strongly recommend to not expose Airbyte on Internet av
 This part assumes that you have access to a terminal on your workstation
 {% endhint %}
 
-* Create ssh tunnels for port 8000 \(the static web server\) and port 8001 \(the api server\)
+* Create ssh tunnel for port 8000
 
   ```bash
   # Inside your workstation terminal
   # 1. Replace $SSH_KEY with private key path downloaded from earlier steps
   # 2. Replace $INSTANCE_IP with publicIpAddress noted from earlier steps
-  ssh -i $SSH_KEY -L 8000:localhost:8000 -L 8001:localhost:8001 -N -f byteuser@$INSTANCE_IP
+  ssh -N -L 8000:localhost:8000 -i $SSH_KEY byteuser@$INSTANCE_IP
   ```
 
 * Just visit [http://localhost:8000](http://localhost:8000) in your browser and start moving some data!
 
 ## Troubleshooting
 
-If you encounter any issues, just connect to our [Slack](https://slack.airbyte.io). Our community will help! We also have a [FAQ](../faq/technical-support.md) section in our docs for common problems.
+If you encounter any issues, just connect to our [Slack](https://slack.airbyte.io). Our community will help! We also have a [FAQ](../troubleshooting/on-deploying.md) section in our docs for common problems.
 

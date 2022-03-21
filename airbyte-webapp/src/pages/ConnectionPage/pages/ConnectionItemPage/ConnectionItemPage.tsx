@@ -1,158 +1,112 @@
 import React, { Suspense } from "react";
-import { FormattedMessage } from "react-intl";
 import { useResource } from "rest-hooks";
+import { Navigate, Route, Routes, useParams } from "react-router-dom";
 
-import PageTitle from "components/PageTitle";
-import useRouter from "components/hooks/useRouterHook";
-import StepsMenu from "components/StepsMenu";
-import StatusView from "./components/StatusView";
-import SettingsView from "./components/SettingsView";
+import { LoadingPage, MainPageWithScroll } from "components";
+import HeadTitle from "components/HeadTitle";
+
+import { useAnalyticsService } from "hooks/services/Analytics/useAnalyticsService";
+
+import FrequencyConfig from "config/FrequencyConfig.json";
+
 import ConnectionResource from "core/resources/Connection";
-import LoadingPage from "components/LoadingPage";
-import MainPageWithScroll from "components/MainPageWithScroll";
-import config from "config";
-import { AnalyticsService } from "core/analytics/AnalyticsService";
-import FrequencyConfig from "data/FrequencyConfig.json";
-import Link from "components/Link";
-import { Routes } from "../../../routes";
-import DestinationDefinitionResource from "core/resources/DestinationDefinition";
-import SourceDefinitionResource from "core/resources/SourceDefinition";
+import { equal } from "utils/objects";
+import ReplicationView from "./components/ReplicationView";
 
-type ConnectionItemPageProps = {
-  currentStep: "status" | "settings";
-};
+import StatusView from "./components/StatusView";
+import TransformationView from "pages/ConnectionPage/pages/ConnectionItemPage/components/TransformationView";
+import SettingsView from "./components/SettingsView";
+import ConnectionPageTitle from "./components/ConnectionPageTitle";
+import { ConnectionSettingsRoutes } from "./ConnectionSettingsRoutes";
 
-const ConnectionItemPage: React.FC<ConnectionItemPageProps> = ({
-  currentStep,
-}) => {
-  const { query, push } = useRouter<{ id: string }>();
-
+const ConnectionItemPage: React.FC = () => {
+  const params = useParams<{
+    connectionId: string;
+    "*": ConnectionSettingsRoutes;
+  }>();
+  const connectionId = params.connectionId || "";
+  const currentStep = params["*"] || ConnectionSettingsRoutes.STATUS;
   const connection = useResource(ConnectionResource.detailShape(), {
-    connectionId: query.id,
+    connectionId,
   });
 
-  const frequency = FrequencyConfig.find(
-    (item) =>
-      JSON.stringify(item.config) === JSON.stringify(connection.schedule)
+  const { source, destination } = connection;
+
+  const analyticsService = useAnalyticsService();
+
+  const frequency = FrequencyConfig.find((item) =>
+    equal(item.config, connection.schedule)
   );
-
-  const sourceDefinition = useResource(
-    SourceDefinitionResource.detailShape(),
-    connection.source
-      ? {
-          sourceDefinitionId: connection.source.sourceDefinitionId,
-        }
-      : null
-  );
-
-  const destinationDefinition = useResource(
-    DestinationDefinitionResource.detailShape(),
-    connection.destination
-      ? {
-          destinationDefinitionId:
-            connection.destination.destinationDefinitionId,
-        }
-      : null
-  );
-
-  const steps = [
-    {
-      id: "status",
-      name: <FormattedMessage id={"sources.status"} />,
-    },
-    {
-      id: "settings",
-      name: <FormattedMessage id={"sources.settings"} />,
-    },
-  ];
-
-  const onSelectStep = (id: string) => {
-    if (id === "settings") {
-      push(
-        `${Routes.Connections}/${connection.connectionId}${Routes.Settings}`
-      );
-    } else {
-      push(`${Routes.Connections}/${connection.connectionId}`);
-    }
-  };
 
   const onAfterSaveSchema = () => {
-    AnalyticsService.track("Source - Action", {
-      user_id: config.ui.workspaceId,
+    analyticsService.track("Source - Action", {
       action: "Edit schema",
-      connector_source: connection.source?.sourceName,
-      connector_source_id: connection.source?.sourceDefinitionId,
-      connector_destination: connection.destination?.destinationName,
-      connector_destination_definition_id:
-        connection.destination?.destinationDefinitionId,
+      connector_source: source.sourceName,
+      connector_source_id: source.sourceDefinitionId,
+      connector_destination: destination.destinationName,
+      connector_destination_definition_id: destination.destinationDefinitionId,
       frequency: frequency?.text,
     });
   };
 
-  const renderStep = () => {
-    if (currentStep === "status") {
-      return (
-        <StatusView
-          connection={connection}
-          frequencyText={frequency?.text}
-          sourceDefinition={sourceDefinition}
-          destinationDefinition={destinationDefinition}
-        />
-      );
-    }
-
-    return (
-      <SettingsView
-        onAfterSaveSchema={onAfterSaveSchema}
-        connectionId={connection.connectionId}
-        frequencyText={frequency?.text}
-        sourceDefinition={sourceDefinition}
-        destinationDefinition={destinationDefinition}
-      />
-    );
-  };
-
-  const linkToSource = () => (
-    <Link clear to={`${Routes.Source}/${connection.source?.sourceId}`}>
-      {connection.source?.name}
-    </Link>
-  );
-
-  const linkToDestination = () => (
-    <Link
-      clear
-      to={`${Routes.Destination}/${connection.destination?.destinationId}`}
-    >
-      {connection.destination?.name}
-    </Link>
-  );
-
   return (
     <MainPageWithScroll
-      title={
-        <PageTitle
-          withLine
-          title={
-            <FormattedMessage
-              id="connection.fromTo"
-              values={{
-                source: linkToSource(),
-                destination: linkToDestination(),
-              }}
-            />
-          }
-          middleComponent={
-            <StepsMenu
-              lightMode
-              data={steps}
-              onSelect={onSelectStep}
-              activeStep={currentStep}
-            />
-          }
+      headTitle={
+        <HeadTitle
+          titles={[
+            { id: "sidebar.connections" },
+            {
+              id: "connection.fromTo",
+              values: {
+                source: source.name,
+                destination: destination.name,
+              },
+            },
+          ]}
+        />
+      }
+      pageTitle={
+        <ConnectionPageTitle
+          source={source}
+          destination={destination}
+          currentStep={currentStep}
         />
       }
     >
-      <Suspense fallback={<LoadingPage />}>{renderStep()}</Suspense>
+      <Suspense fallback={<LoadingPage />}>
+        <Routes>
+          <Route
+            path={ConnectionSettingsRoutes.STATUS}
+            element={
+              <StatusView
+                connection={connection}
+                frequencyText={frequency?.text}
+              />
+            }
+          />
+          <Route
+            path={ConnectionSettingsRoutes.REPLICATION}
+            element={
+              <ReplicationView
+                onAfterSaveSchema={onAfterSaveSchema}
+                connectionId={connectionId}
+              />
+            }
+          />
+          <Route
+            path={ConnectionSettingsRoutes.TRANSFORMATION}
+            element={<TransformationView connection={connection} />}
+          />
+          <Route
+            path={ConnectionSettingsRoutes.SETTINGS}
+            element={<SettingsView connectionId={connectionId} />}
+          />
+          <Route
+            index
+            element={<Navigate to={ConnectionSettingsRoutes.STATUS} />}
+          />
+        </Routes>
+      </Suspense>
     </MainPageWithScroll>
   );
 };

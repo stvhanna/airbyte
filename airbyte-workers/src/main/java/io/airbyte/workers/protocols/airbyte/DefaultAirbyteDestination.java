@@ -1,25 +1,5 @@
 /*
- * MIT License
- *
- * Copyright (c) 2020 Airbyte
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * Copyright (c) 2021 Airbyte, Inc., all rights reserved.
  */
 
 package io.airbyte.workers.protocols.airbyte;
@@ -29,8 +9,13 @@ import com.google.common.base.Preconditions;
 import io.airbyte.commons.io.IOs;
 import io.airbyte.commons.io.LineGobbler;
 import io.airbyte.commons.json.Jsons;
-import io.airbyte.config.StandardTargetConfig;
+import io.airbyte.commons.logging.LoggingHelper.Color;
+import io.airbyte.commons.logging.MdcScope;
+import io.airbyte.commons.logging.MdcScope.Builder;
+import io.airbyte.config.WorkerDestinationConfig;
 import io.airbyte.protocol.models.AirbyteMessage;
+import io.airbyte.protocol.models.AirbyteMessage.Type;
+import io.airbyte.workers.WorkerConfigs;
 import io.airbyte.workers.WorkerConstants;
 import io.airbyte.workers.WorkerException;
 import io.airbyte.workers.WorkerUtils;
@@ -39,45 +24,68 @@ import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.OutputStreamWriter;
 import java.nio.file.Path;
+import java.util.Iterator;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class DefaultAirbyteDestination implements AirbyteDestination {
 
   private static final Logger LOGGER = LoggerFactory.getLogger(DefaultAirbyteDestination.class);
+  private static final MdcScope.Builder CONTAINER_LOG_MDC_BUILDER = new Builder()
+      .setLogPrefix("destination")
+      .setPrefixColor(Color.YELLOW_BACKGROUND);
 
+  private final WorkerConfigs workerConfigs;
   private final IntegrationLauncher integrationLauncher;
+  private final AirbyteStreamFactory streamFactory;
+
+  private final AtomicBoolean endOfStream = new AtomicBoolean(false);
 
   private Process destinationProcess = null;
   private BufferedWriter writer = null;
-  private boolean endOfStream = false;
+  private Iterator<AirbyteMessage> messageIterator = null;
+  private Integer exitValue = null;
 
-  public DefaultAirbyteDestination(final IntegrationLauncher integrationLauncher) {
+  public DefaultAirbyteDestination(final WorkerConfigs workerConfigs, final IntegrationLauncher integrationLauncher) {
+    this(workerConfigs, integrationLauncher, new DefaultAirbyteStreamFactory(CONTAINER_LOG_MDC_BUILDER));
+
+  }
+
+  public DefaultAirbyteDestination(final WorkerConfigs workerConfigs,
+                                   final IntegrationLauncher integrationLauncher,
+                                   final AirbyteStreamFactory streamFactory) {
+    this.workerConfigs = workerConfigs;
     this.integrationLauncher = integrationLauncher;
+    this.streamFactory = streamFactory;
   }
 
   @Override
-  public void start(StandardTargetConfig destinationConfig, Path jobRoot) throws IOException, WorkerException {
+  public void start(final WorkerDestinationConfig destinationConfig, final Path jobRoot) throws IOException, WorkerException {
     Preconditions.checkState(destinationProcess == null);
-    IOs.writeFile(jobRoot, WorkerConstants.DESTINATION_CONFIG_JSON_FILENAME,
-        Jsons.serialize(destinationConfig.getDestinationConnectionConfiguration()));
-    IOs.writeFile(jobRoot, WorkerConstants.DESTINATION_CATALOG_JSON_FILENAME, Jsons.serialize(destinationConfig.getCatalog()));
 
     LOGGER.info("Running destination...");
     destinationProcess = integrationLauncher.write(
         jobRoot,
         WorkerConstants.DESTINATION_CONFIG_JSON_FILENAME,
-        WorkerConstants.DESTINATION_CATALOG_JSON_FILENAME).start();
-    LineGobbler.gobble(destinationProcess.getInputStream(), LOGGER::info);
-    LineGobbler.gobble(destinationProcess.getErrorStream(), LOGGER::error);
+        Jsons.serialize(destinationConfig.getDestinationConnectionConfiguration()),
+        WorkerConstants.DESTINATION_CATALOG_JSON_FILENAME,
+        Jsons.serialize(destinationConfig.getCatalog()));
+    // stdout logs are logged elsewhere since stdout also contains data
+    LineGobbler.gobble(destinationProcess.getErrorStream(), LOGGER::error, "airbyte-destination", CONTAINER_LOG_MDC_BUILDER);
 
     writer = new BufferedWriter(new OutputStreamWriter(destinationProcess.getOutputStream(), Charsets.UTF_8));
+
+    messageIterator = streamFactory.create(IOs.newBufferedReader(destinationProcess.getInputStream()))
+        .filter(message -> message.getType() == Type.STATE)
+        .iterator();
   }
 
   @Override
-  public void accept(AirbyteMessage message) throws IOException {
-    Preconditions.checkState(destinationProcess != null && !endOfStream);
+  public void accept(final AirbyteMessage message) throws IOException {
+    Preconditions.checkState(destinationProcess != null && !endOfStream.get());
 
     writer.write(Jsons.serialize(message));
     writer.newLine();
@@ -85,27 +93,30 @@ public class DefaultAirbyteDestination implements AirbyteDestination {
 
   @Override
   public void notifyEndOfStream() throws IOException {
-    Preconditions.checkState(destinationProcess != null && !endOfStream);
+    Preconditions.checkState(destinationProcess != null && !endOfStream.get());
 
     writer.flush();
     writer.close();
-    endOfStream = true;
+    endOfStream.set(true);
   }
 
   @Override
-  public void close() throws WorkerException, IOException {
+  public void close() throws Exception {
     if (destinationProcess == null) {
+      LOGGER.debug("Destination process already exited");
       return;
     }
 
-    if (!endOfStream) {
+    if (!endOfStream.get()) {
       notifyEndOfStream();
     }
 
     LOGGER.debug("Closing destination process");
-    WorkerUtils.gentleClose(destinationProcess, 10, TimeUnit.HOURS);
-    if (destinationProcess.isAlive() || destinationProcess.exitValue() != 0) {
-      throw new WorkerException("destination process wasn't successful");
+    WorkerUtils.gentleClose(workerConfigs, destinationProcess, 1, TimeUnit.MINUTES);
+    if (destinationProcess.isAlive() || getExitValue() != 0) {
+      final String message =
+          destinationProcess.isAlive() ? "Destination has not terminated " : "Destination process exit with code " + getExitValue();
+      throw new WorkerException(message + ". This warning is normal if the job was cancelled.");
     }
   }
 
@@ -120,6 +131,38 @@ public class DefaultAirbyteDestination implements AirbyteDestination {
       WorkerUtils.cancelProcess(destinationProcess);
       LOGGER.info("Cancelled destination process!");
     }
+  }
+
+  @Override
+  public boolean isFinished() {
+    Preconditions.checkState(destinationProcess != null);
+    // As this check is done on every message read, it is important for this operation to be efficient.
+    // Short circuit early to avoid checking the underlying process.
+    final var isEmpty = !messageIterator.hasNext(); // hasNext is blocking.
+    if (!isEmpty) {
+      return false;
+    }
+
+    return !destinationProcess.isAlive();
+  }
+
+  @Override
+  public int getExitValue() {
+    Preconditions.checkState(destinationProcess != null, "Destination process is null, cannot retrieve exit value.");
+    Preconditions.checkState(!destinationProcess.isAlive(), "Destination process is still alive, cannot retrieve exit value.");
+
+    if (exitValue == null) {
+      exitValue = destinationProcess.exitValue();
+    }
+
+    return exitValue;
+  }
+
+  @Override
+  public Optional<AirbyteMessage> attemptRead() {
+    Preconditions.checkState(destinationProcess != null);
+
+    return Optional.ofNullable(messageIterator.hasNext() ? messageIterator.next() : null);
   }
 
 }

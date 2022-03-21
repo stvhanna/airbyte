@@ -1,17 +1,13 @@
-import React, { useMemo, useState } from "react";
+import React, { useState } from "react";
 import { FormattedMessage } from "react-intl";
-
-import ContentCard from "components/ContentCard";
-import ServiceForm from "components/ServiceForm";
-import { AnalyticsService } from "core/analytics/AnalyticsService";
-import config from "config";
-import useRouter from "components/hooks/useRouterHook";
-import { useDestinationDefinitionSpecificationLoad } from "components/hooks/services/useDestinationHook";
-import { JobInfo } from "core/resources/Scheduler";
-import { JobsLogItem } from "components/JobItem";
+import useRouter from "hooks/useRouter";
+import { useDestinationDefinitionSpecificationLoad } from "hooks/services/useDestinationHook";
 import { createFormErrorMessage } from "utils/errorStatusMessage";
 import { ConnectionConfiguration } from "core/domain/connection";
-import { DestinationDefinition } from "../../../../../core/resources/DestinationDefinition";
+import { useAnalyticsService } from "hooks/services/Analytics/useAnalyticsService";
+import { LogsRequestError } from "core/request/LogsRequestError";
+import { ConnectorCard } from "views/Connector/ConnectorCard";
+import { DestinationDefinition } from "core/domain/connector";
 
 type IProps = {
   onSubmit: (values: {
@@ -23,8 +19,18 @@ type IProps = {
   destinationDefinitions: DestinationDefinition[];
   hasSuccess?: boolean;
   error?: { message?: string; status?: number } | null;
-  jobInfo?: JobInfo;
   afterSelectConnector?: () => void;
+};
+
+const hasDestinationDefinitionId = (
+  state: unknown
+): state is { destinationDefinitionId: string } => {
+  return (
+    typeof state === "object" &&
+    state !== null &&
+    typeof (state as { destinationDefinitionId?: string })
+      .destinationDefinitionId === "string"
+  );
 };
 
 const DestinationForm: React.FC<IProps> = ({
@@ -32,42 +38,35 @@ const DestinationForm: React.FC<IProps> = ({
   destinationDefinitions,
   error,
   hasSuccess,
-  jobInfo,
   afterSelectConnector,
 }) => {
   const { location } = useRouter();
-
-  const availableServices = useMemo(
-    () =>
-      destinationDefinitions.map((item) => ({
-        text: item.name,
-        value: item.destinationDefinitionId,
-        icon: item.icon,
-      })),
-    [destinationDefinitions]
-  );
+  const analyticsService = useAnalyticsService();
 
   const [destinationDefinitionId, setDestinationDefinitionId] = useState(
-    location.state?.destinationDefinitionId || ""
+    hasDestinationDefinitionId(location.state)
+      ? location.state.destinationDefinitionId
+      : ""
   );
   const {
     destinationDefinitionSpecification,
     isLoading,
+    sourceDefinitionError,
   } = useDestinationDefinitionSpecificationLoad(destinationDefinitionId);
+
   const onDropDownSelect = (destinationDefinitionId: string) => {
     setDestinationDefinitionId(destinationDefinitionId);
-    const connector = availableServices.find(
-      (item) => item.value === destinationDefinitionId
+    const connector = destinationDefinitions.find(
+      (item) => item.destinationDefinitionId === destinationDefinitionId
     );
 
     if (afterSelectConnector) {
       afterSelectConnector();
     }
 
-    AnalyticsService.track("New Destination - Action", {
-      user_id: config.ui.workspaceId,
+    analyticsService.track("New Destination - Action", {
       action: "Select a connector",
-      connector_destination_definition: connector?.text,
+      connector_destination_definition: connector?.name,
       connector_destination_definition_id: destinationDefinitionId,
     });
   };
@@ -86,27 +85,25 @@ const DestinationForm: React.FC<IProps> = ({
   const errorMessage = error ? createFormErrorMessage(error) : null;
 
   return (
-    <ContentCard title={<FormattedMessage id="onboarding.destinationSetUp" />}>
-      <ServiceForm
-        onDropDownSelect={onDropDownSelect}
-        onSubmit={onSubmitForm}
-        formType="destination"
-        availableServices={availableServices}
-        specifications={
-          destinationDefinitionSpecification?.connectionSpecification
-        }
-        hasSuccess={hasSuccess}
-        errorMessage={errorMessage}
-        isLoading={isLoading}
-        formValues={
-          destinationDefinitionId
-            ? { serviceType: destinationDefinitionId, name: "" }
-            : undefined
-        }
-        allowChangeConnector
-      />
-      <JobsLogItem jobInfo={jobInfo} />
-    </ContentCard>
+    <ConnectorCard
+      onServiceSelect={onDropDownSelect}
+      fetchingConnectorError={sourceDefinitionError}
+      onSubmit={onSubmitForm}
+      formType="destination"
+      availableServices={destinationDefinitions}
+      selectedConnector={destinationDefinitionSpecification}
+      hasSuccess={hasSuccess}
+      errorMessage={errorMessage}
+      isLoading={isLoading}
+      formValues={
+        destinationDefinitionId
+          ? { serviceType: destinationDefinitionId }
+          : undefined
+      }
+      allowChangeConnector
+      title={<FormattedMessage id="onboarding.destinationSetUp" />}
+      jobInfo={LogsRequestError.extractJobInfo(error)}
+    />
   );
 };
 

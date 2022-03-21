@@ -2,6 +2,7 @@ import { JSONSchema7 } from "json-schema";
 import * as yup from "yup";
 
 import { WidgetConfigMap } from "core/form/types";
+import { isDefined } from "utils/common";
 
 /**
  * Returns yup.schema for validation
@@ -17,38 +18,38 @@ import { WidgetConfigMap } from "core/form/types";
  * @param propertyKey used in recursive schema building for building path for uiConfig
  * @param propertyPath constructs path of property
  */
-
 export const buildYupFormForJsonSchema = (
   jsonSchema: JSONSchema7,
   uiConfig?: WidgetConfigMap,
   parentSchema?: JSONSchema7,
   propertyKey?: string,
   propertyPath: string | undefined = propertyKey
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-): yup.Schema<any> => {
+): yup.AnySchema => {
   let schema:
     | yup.NumberSchema
     | yup.StringSchema
-    | yup.ObjectSchema
-    | yup.ArraySchema<unknown>
+    | yup.AnyObjectSchema
+    | yup.ArraySchema<yup.AnySchema>
     | yup.BooleanSchema
     | null = null;
 
   if (jsonSchema.oneOf && uiConfig && propertyPath) {
-    const selectedSchema =
-      jsonSchema.oneOf.find((condition) => {
-        if (typeof condition !== "boolean") {
-          return uiConfig[propertyPath]?.selectedItem === condition.title;
-        }
-        return false;
-      }) ?? jsonSchema.oneOf[0];
+    let selectedSchema = jsonSchema.oneOf.find(
+      (condition) =>
+        typeof condition !== "boolean" &&
+        uiConfig[propertyPath]?.selectedItem === condition.title
+    );
+
+    // Select first oneOf path if no item selected
+    selectedSchema = selectedSchema ?? jsonSchema.oneOf[0];
+
     if (selectedSchema && typeof selectedSchema !== "boolean") {
       return buildYupFormForJsonSchema(
         { type: jsonSchema.type, ...selectedSchema },
         uiConfig,
         jsonSchema,
         propertyKey,
-        propertyPath ? `${propertyPath}.${propertyKey}` : propertyKey
+        propertyPath
       );
     }
   }
@@ -98,49 +99,59 @@ export const buildYupFormForJsonSchema = (
       }
       break;
     case "object":
-      schema = yup
-        .object()
-        .shape(
-          Object.fromEntries(
-            Object.entries(
-              jsonSchema.properties || {}
-            ).map(([propertyKey, condition]) => [
+      let objectSchema = yup.object();
+
+      const keyEntries = Object.entries(
+        jsonSchema.properties || {}
+      ).map(([propertyKey, condition]) => [
+        propertyKey,
+        typeof condition !== "boolean"
+          ? buildYupFormForJsonSchema(
+              condition,
+              uiConfig,
+              jsonSchema,
               propertyKey,
-              typeof condition !== "boolean"
-                ? buildYupFormForJsonSchema(
-                    condition,
-                    uiConfig,
-                    jsonSchema,
-                    propertyKey,
-                    propertyPath
-                      ? `${propertyPath}.${propertyKey}`
-                      : propertyKey
-                  )
-                : yup.mixed(),
-            ])
-          )
-        );
+              propertyPath ? `${propertyPath}.${propertyKey}` : propertyKey
+            )
+          : yup.mixed(),
+      ]);
+
+      if (keyEntries.length) {
+        objectSchema = objectSchema.shape(Object.fromEntries(keyEntries));
+      } else {
+        objectSchema = objectSchema.default({});
+      }
+
+      schema = objectSchema;
   }
 
-  const hasDefault =
-    jsonSchema.default !== undefined && jsonSchema.default !== null;
+  if (schema) {
+    const hasDefault = isDefined(jsonSchema.default);
 
-  if (schema && hasDefault) {
-    schema = schema.default(jsonSchema.default);
-  }
+    if (hasDefault) {
+      // @ts-ignore can't infer correct type here so lets just use default from json_schema
+      schema = schema.default(jsonSchema.default);
+    }
 
-  if (schema && jsonSchema.enum) {
-    schema = schema.oneOf(jsonSchema.enum as any);
-  }
+    if (!hasDefault && jsonSchema.const) {
+      // @ts-ignore can't infer correct type here so lets just use default from json_schema
+      schema = schema.oneOf([jsonSchema.const]).default(jsonSchema.const);
+    }
 
-  const isRequired =
-    !hasDefault &&
-    parentSchema &&
-    Array.isArray(parentSchema?.required) &&
-    parentSchema.required.find((item) => item === propertyKey);
+    if (jsonSchema.enum) {
+      // @ts-ignore as enum is array we are going to use it as oneOf for yup
+      schema = schema.oneOf(jsonSchema.enum);
+    }
 
-  if (isRequired && schema) {
-    schema = schema.required("form.empty.error");
+    const isRequired =
+      !hasDefault &&
+      parentSchema &&
+      Array.isArray(parentSchema?.required) &&
+      parentSchema.required.find((item) => item === propertyKey);
+
+    if (schema && isRequired) {
+      schema = schema.required("form.empty.error");
+    }
   }
 
   return schema || yup.mixed();

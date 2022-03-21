@@ -3,14 +3,17 @@ import styled from "styled-components";
 
 import Step from "./components/Step";
 
+export type StepMenuItem = {
+  id: string;
+  name: string | React.ReactNode;
+  status?: string;
+  isPartialSuccess?: boolean;
+  onSelect?: () => void;
+};
+
 type IProps = {
   lightMode?: boolean;
-  data: Array<{
-    id: string;
-    name: string | React.ReactNode;
-    status?: string;
-    onSelect?: () => void;
-  }>;
+  data: StepMenuItem[];
   activeStep?: string;
   onSelect?: (id: string) => void;
 };
@@ -33,6 +36,7 @@ const StepsMenu: React.FC<IProps> = ({
       {data.map((item, key) => (
         <Step
           status={item.status}
+          isPartialSuccess={item.isPartialSuccess}
           lightMode={lightMode}
           key={item.id}
           num={key + 1}
